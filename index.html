@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCQ CQ Styler</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23173a63'/%3E%3Ccircle cx='32' cy='32' r='15' fill='none' stroke='white' stroke-width='5'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"><span>ক</span></span>
+      <div>
+        <div class="brand-name">MCQ · CQ Styler</div>
+        <div class="brand-sub">Word in → Typst-styled Word out</div>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <a href="#convert" class="tab" data-view="convert" role="tab">Convert</a>
+      <a href="#settings" class="tab" data-view="settings" role="tab">Settings</a>
+    </nav>
+    <nav class="tabs" aria-label="Other tools">
+      <a class="tab" href="typst.html" title="Word to an editable Typst project">Typst Studio</a>
+      <a class="tab" href="html.html" title="Word to an editable HTML + CSS project">HTML Studio</a>
+      <a class="tab" href="pdf.html" title="Word to PDF in the Typst layout">PDF</a>
+    </nav>
+  </header>
+
+  <!-- ===================== Convert ===================== -->
+  <main id="view-convert" class="view">
+    <section class="convert-grid">
+      <div class="col-main">
+        <label id="drop" class="drop" tabindex="0">
+          <input id="file" type="file" accept=".docx,.docm,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+          <span class="drop-icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48" width="44" height="44"><path d="M14 6h14l10 10v24a2 2 0 0 1-2 2H14a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><path d="M28 6v10h10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><path d="M24 34V22m-5 5 5-5 5 5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="drop-title">Drop a Word file here</span>
+          <span class="drop-sub">or <u>choose a .docx</u>. It never leaves this browser.</span>
+        </label>
+
+        <div id="job" class="card job" hidden>
+          <div class="job-head">
+            <div class="file-badge">DOCX</div>
+            <div class="job-file">
+              <div id="job-name" class="job-name"></div>
+              <div id="job-size" class="muted"></div>
+            </div>
+            <button id="again" class="btn btn-quiet" type="button">Convert another</button>
+          </div>
+          <ol class="steps" id="steps">
+            <li data-step="read">Read document</li>
+            <li data-step="find">Find MCQ &amp; CQ</li>
+            <li data-step="style">Apply styling</li>
+            <li data-step="pack">Build file</li>
+          </ol>
+          <div id="job-error" class="error" hidden></div>
+          <div id="job-result" class="result" hidden>
+            <div class="stats">
+              <div class="stat"><b id="st-mcq">0</b><span>MCQ parts</span></div>
+              <div class="stat"><b id="st-q">0</b><span>questions restyled</span></div>
+              <div class="stat"><b id="st-cq">0</b><span>CQ parts</span></div>
+            </div>
+            <a id="download" class="btn btn-primary btn-big" download>
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span id="download-label">Download</span>
+            </a>
+            <button id="dl-questions" class="btn btn-big" type="button">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 5h16M4 10h16M4 15h10M4 20h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              <span id="dl-questions-label">Download questions (.zip) — MCQ / CQ sheets and cropped pictures</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="card how">
+          <h3>What changes</h3>
+          <div class="how-grid">
+            <div><span class="pill pill-mcq">MCQ</span><p>Two columns, circled ক খ গ ঘ options, the answer as a black circle, board references pushed right.</p></div>
+            <div><span class="pill pill-cq">CQ</span><p>Two columns, sub-questions indented.</p></div>
+            <div><span class="pill pill-page">Page</span><p>Kept as in the Word file. If you want them, you can switch on the Typst page size, header and footer in Settings.</p></div>
+            <div><span class="pill pill-keep">Kept</span><p>Everything else stays exactly as in the Word file. No tags needed.</p></div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="col-side">
+        <div class="card side-card">
+          <div class="side-head">
+            <h3>Current style</h3>
+            <a href="#settings" class="link">Edit</a>
+          </div>
+          <div id="summary" class="chips"></div>
+          <div class="preview-frame small"><div id="preview-mini" class="preview-host"></div></div>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <!-- ===================== Settings ===================== -->
+  <main id="view-settings" class="view" hidden>
+    <div class="settings-bar">
+      <div>
+        <h2>Settings</h2>
+        <p class="muted">The same values you would edit in the Typst <code>page_setup_template.typ</code>, <code>tags/mcq.typ</code> and <code>tags/cq.typ</code>. Changes are saved in this browser automatically.</p>
+      </div>
+      <div class="settings-actions">
+        <span id="saved" class="saved">Saved</span>
+        <button id="export" class="btn btn-quiet" type="button">Export</button>
+        <label class="btn btn-quiet">Import<input id="import" type="file" accept=".json,application/json" hidden></label>
+        <button id="reset-all" class="btn btn-quiet danger" type="button">Reset all to Typst</button>
+      </div>
+    </div>
+    <div class="settings-grid">
+      <nav id="section-nav" class="section-nav"></nav>
+      <div id="form" class="form"></div>
+      <aside class="preview-col">
+        <div class="card preview-card">
+          <div class="side-head">
+            <h3>Preview</h3>
+            <div class="seg" role="group" aria-label="Page">
+              <button type="button" data-page="1" class="on">Odd page</button>
+              <button type="button" data-page="2">Even page</button>
+            </div>
+          </div>
+          <div class="preview-frame"><div id="preview" class="preview-host"></div></div>
+          <p class="muted tiny">Sample text, drawn from the settings. Word's rendering will differ slightly.</p>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="js/assets.js"></script>
+  <script src="js/settings.js"></script>
+  <script src="js/omml.js"></script>
+  <script src="js/docx-reader.js"></script>
+  <script src="js/classify.js"></script>
+  <script src="js/docx-pagesetup.js"></script>
+  <script src="js/docx-writer.js"></script>
+  <script src="js/preview.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+  <script src="js/scrapper/parser.js"></script>
+  <script src="js/scrapper/sq.js"></script>
+  <script src="js/scrapper/core.js"></script>
+  <script src="js/scrapper/images.js"></script>
+  <script src="js/question-export.js"></script>
+  <script src="js/docx-app.js"></script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOCX to PDF</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23c0392b'/%3E%3Cpath d='M20 14h17l9 9v27H20z' fill='white'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body class="app">
+  <div class="bar">
+    <h1>DOCX → PDF</h1>
+    <span class="btn file-btn">Choose .docx<input id="file" type="file" accept=".docx,.docm,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></span>
+    <label class="opt-toggle"><input id="grey" type="checkbox" checked> Greyscale pictures</label>
+    <input id="label" type="text" placeholder="Header text (blank = read from the Word page header)">
+    <button id="pdf" class="btn primary" disabled>Download PDF</button>
+    <span id="status" class="status"></span>
+    <span id="summary" class="summary"></span>
+  </div>
+
+  <div id="drop" class="drop">
+    <h2>Drop a Word file here</h2>
+    <p>MCQ and CQ parts are found automatically. No <code>mcq (start)</code> / <code>cq (start)</code> tags needed.</p>
+    <p>The pages are laid out like the Typst output: two columns for MCQ and CQ, option circles, the black answer circle, and the running header and footer.</p>
+    <p>Everything runs in this browser tab. The file is not uploaded anywhere.</p>
+  </div>
+
+  <div id="pages"></div>
+  <div id="measure"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+  <script src="js/assets.js"></script>
+  <script src="js/omml.js"></script>
+  <script src="js/docx-reader.js"></script>
+  <script src="js/classify.js"></script>
+  <script src="js/shapes.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/paginate.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

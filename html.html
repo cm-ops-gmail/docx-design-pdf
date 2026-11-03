@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HTML Studio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23e44d26'/%3E%3Ctext x='32' y='43' font-size='26' text-anchor='middle' fill='white' font-family='monospace'%3E%3C/%3E%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/studio.css">
+</head>
+<body class="studio">
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true" style="background:#e44d26"><span>&lt;&gt;</span></span>
+      <div>
+        <div class="brand-name">HTML Studio</div>
+        <div class="brand-sub">Word in → editable HTML + CSS → pages → PDF</div>
+      </div>
+    </div>
+    <nav class="tool-links">
+      <a class="tab" href="index.html">Styler</a>
+      <a class="tab" href="typst.html">Typst</a>
+      <a class="tab on" href="html.html">HTML</a>
+    </nav>
+  </header>
+
+  <section id="start" class="studio-start">
+    <div class="wrap">
+      <div>
+        <h2>Turn a Word file into an HTML + CSS project</h2>
+        <p class="lede">The pages use the Typst template layout and are drawn by the browser itself, so Bangla shapes perfectly. Edit the HTML or CSS here and the pages update. Print to save the PDF. The downloaded folder works on its own: open its index.html in Chrome.</p>
+      </div>
+      <label id="drop" class="drop" tabindex="0">
+        <input id="file" type="file" accept=".docx,.docm,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+        <span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 48 48" width="44" height="44"><path d="M14 6h14l10 10v24a2 2 0 0 1-2 2H14a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><path d="M28 6v10h10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><path d="M24 34V22m-5 5 5-5 5 5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span class="drop-title">Drop a Word file here</span>
+        <span class="drop-sub">or <u>choose a .docx</u>. It never leaves this browser.</span>
+      </label>
+      <div class="opt-row">
+        <label class="switch"><input id="grey" type="checkbox" checked> <span>Greyscale pictures</span></label>
+      </div>
+      <div id="loading" class="card loading" hidden><span class="spinner"></span><span id="loading-text">Working…</span></div>
+      <div class="card tree-card">
+        <h3>What you get</h3>
+        <ul>
+          <li>index.html — the content, one element per block</li>
+          <li>style.css — page, header, footer, MCQ and CQ styles</li>
+          <li>engine.js — lays the content out on pages</li>
+          <li>fonts.css — Kalpurush · images/ — pictures · templates/ — logos</li>
+          <li>questions/ — MCQ / CQ sheets, cropped question pictures, media and media_color (like the scraper and the Typst converter)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="workspace" class="workspace" hidden>
+    <aside class="pane">
+      <div class="pane-head"><h3>Project</h3></div>
+      <div id="files" class="files"></div>
+      <div class="pane-head" style="border-top:1px solid var(--line);border-bottom:0">
+        <button id="new" class="btn btn-quiet btn-sm" type="button">Open another .docx</button>
+      </div>
+    </aside>
+    <section class="pane pane-editor">
+      <div class="pane-head">
+        <h3 id="editing">index.html</h3>
+        <span id="status" class="status-pill">Ready</span>
+      </div>
+      <div id="editor" class="editor-host"></div>
+    </section>
+    <section class="pane pane-preview">
+      <div class="pane-head">
+        <h3>Pages</h3>
+        <button id="refresh" class="btn btn-quiet btn-sm" type="button" title="Lay out again (Ctrl/Cmd + S)">Refresh</button>
+        <button id="print" class="btn btn-quiet btn-sm" type="button" disabled>Print / Save PDF</button>
+        <button id="dl-zip" class="btn btn-primary btn-sm" type="button" disabled>Download project (.zip)</button>
+      </div>
+      <div class="preview-box"><iframe id="preview" title="Page preview"></iframe></div>
+    </section>
+  </section>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>
+  <script src="js/assets.js"></script>
+  <script src="js/omml.js"></script>
+  <script src="js/docx-reader.js"></script>
+  <script src="js/classify.js"></script>
+  <script src="js/shapes.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/html-export-assets.js"></script>
+  <script src="js/html-gen.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+  <script src="js/scrapper/parser.js"></script>
+  <script src="js/scrapper/sq.js"></script>
+  <script src="js/scrapper/core.js"></script>
+  <script src="js/scrapper/images.js"></script>
+  <script src="js/question-export.js"></script>
+  <script src="js/html-app.js"></script>
+</body>
+</html>

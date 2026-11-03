@@ -1,0 +1,183 @@
+/* ===== Page styles: values mirror the Typst templates and were checked against a Typst-rendered PDF ===== */
+:root {
+  --font: "Kalpurush", "Noto Serif Bengali", serif;
+  --gap: 0.6em;          /* space between paragraphs */
+  --lh: 1.21;            /* line pitch (Typst leading 0.6em with Kalpurush) */
+}
+
+.page {
+  position: relative;
+  width: 8.5in;
+  height: 10.6in;
+  background: #fff;
+  color: #000;
+  overflow: hidden;
+  font-family: var(--font);
+  font-size: 10pt;
+  line-height: var(--lh);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.page *, .measure * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+/* running header: odd = logo | chapter, even = chapter | logo; ruled underneath */
+.hdr { position: absolute; left: 0.58in; right: 0.58in; top: 0.38in; }
+.hdr-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 12pt; height: 0.2in; }
+.hdr-logo { height: 0.2in; width: auto; display: block; }
+/* no overflow clipping here: Bangla vowel signs (ি ী) rise above the line box */
+.hdr-label { font-size: 10pt; line-height: 1; white-space: nowrap; padding-bottom: 1pt; }
+.hdr .rule, .ftr .rule { height: 0; border-top: 0.5pt solid #000; }
+.hdr .rule { margin-top: 2.5pt; }
+
+/* footer: odd = logo | page no., even = page no. | logo */
+.ftr { position: absolute; left: 0.58in; right: 0.58in; top: calc(10.6in - 0.68in + 0.03in); }
+.ftr-row { display: flex; justify-content: space-between; align-items: center; margin-top: 4pt; height: 0.28in; }
+.ftr-logo { height: 0.28in; width: auto; display: block; }
+.ftr-num { font-size: 10pt; line-height: 1; }
+
+.body { position: absolute; top: 0.68in; left: 0.58in; width: calc(8.5in - 1.16in); height: calc(10.6in - 1.36in); }
+.region { position: absolute; left: 0; width: 100%; }
+.region.two { display: flex; gap: calc((8.5in - 1.16in) * 0.04); align-items: flex-start; }
+.region.two > .col { flex: 0 0 calc((8.5in - 1.16in) * 0.48); width: calc((8.5in - 1.16in) * 0.48); }
+.region > .col { min-width: 0; }
+
+/* the hidden box blocks are measured in: same fonts and widths as the page */
+#measure { position: absolute; left: -20000px; top: 0; visibility: hidden; }
+.measure { font-family: var(--font); font-size: 10pt; line-height: var(--lh); }
+
+.zone-normal, .zone-cq { font-size: 10pt; }
+.zone-mcq { font-size: 9pt; }
+
+/* ----- blocks ----- */
+.p, .fig, .eq, .tbl, .mq, .textbox { display: flow-root; margin: 0; }
+.p { padding-bottom: var(--gap); text-align: justify; text-justify: inter-word; }
+.p.center { text-align: center; }
+.p.right { text-align: right; }
+.p.brk { padding-bottom: 0; text-align-last: justify; }
+.p.center.brk, .p.right.brk { text-align-last: auto; }
+.p.h1 { font-size: 12pt; font-weight: bold; text-align: center; padding-bottom: calc(var(--gap) + 0.4em); }
+.p.h2 { font-size: 11pt; font-weight: bold; padding-bottom: calc(var(--gap) + 0.2em); }
+.p.shd { padding: 8pt; margin-bottom: var(--gap); }
+.p.boxed { border: 0.7pt solid #000; padding: 6pt; margin-bottom: var(--gap); }
+
+.b { font-weight: bold; }
+.i { font-style: italic; }
+.u { text-decoration: underline; text-underline-offset: 2pt; }
+.s { text-decoration: line-through; }
+.u.s { text-decoration: underline line-through; }
+.sub { vertical-align: sub; font-size: 0.7em; line-height: 0; }
+.sup { vertical-align: super; font-size: 0.7em; line-height: 0; }
+.small { font-size: 0.8em; }
+.hl { padding: 0 1.5pt; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.tab { display: inline-block; width: 2em; }
+
+.fig { text-align: center; padding-bottom: var(--gap); }
+/* floating pictures that text wraps around in Word */
+.fl-left { float: left; margin: 2pt 10pt 4pt 0; }
+.fl-right { float: right; margin: 2pt 0 4pt 10pt; }
+img.fl-left, img.fl-right { max-width: 45%; height: auto; }
+.fl-block { display: block; margin: 4pt auto; }
+img.fl-block { height: auto; }
+img.pic { max-width: 100%; height: auto; vertical-align: middle; }
+.fig img.pic { vertical-align: top; }
+.img-missing { display: inline-flex; align-items: center; justify-content: center; max-width: 100%; min-height: 24px; border: 0.7pt dashed #888; color: #777; font-size: 8pt; padding: 2pt 6pt; box-sizing: border-box; }
+
+.eq { padding: 0 0 var(--gap) 0.2in; }
+.eq .katex-display { margin: 0.2em 0; }
+.katex { font-size: 1.05em; }
+
+/* tables: Typst #table(inset, stroke: 0.7pt + black, first row centred and lightly shaded) */
+.tbl { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: var(--gap); }
+.tbl td { border: 0.7pt solid #000; padding: 4pt 6pt; vertical-align: middle; overflow-wrap: anywhere; }
+.tbl td.head { background: #f2f2f2; }
+.tbl td.row0 { text-align: center; }
+.tbl.plain td { border: none; padding: 1pt 4pt; }
+.p.in-cell { padding: 0; text-align: left; }
+.p.in-cell + .p.in-cell { margin-top: 0.3em; }
+.tbl td.row0 .p.in-cell { text-align: center; }
+.fig.in-cell { padding: 0; }
+.textbox { border: 0.7pt solid #000; padding: 6pt 8pt; margin-bottom: var(--gap); }
+.cellbox { display: flow-root; padding: 6pt 8pt 0; margin-bottom: var(--gap); }
+.cellbox.bordered { border: 0.7pt solid #000; }
+.cellbox.brk { margin-bottom: 0; border-bottom-style: dashed; }
+.cellbox.cont { border-top-style: dashed; }
+
+/* ----- drawings (flowcharts, labelled boxes) ----- */
+.drawing-holder { display: inline-block; position: relative; vertical-align: top; }
+.drawing { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.drawing .shape { position: absolute; box-sizing: border-box; }
+.drawing .shape-bg { position: absolute; left: 0; top: 0; overflow: visible; }
+.drawing .shape-text { position: absolute; inset: 0; display: flex; flex-direction: column; box-sizing: border-box; line-height: 1.2; font-size: 10pt; }
+.drawing .p.in-shape { padding: 0; }
+.drawing-lines { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+
+/* ----- MCQ (tags/mcq.typ): 9pt, hanging indent 1.8em, option circles, black answer circle ----- */
+.mq { padding-bottom: 0; }
+.mq-line { padding-left: 1.8em; text-indent: -1.8em; }
+.mq-line.cont { text-indent: 0; }
+.mq.cont > .mq-line:first-child { text-indent: 0; }
+.src { float: right; font-size: 7pt; font-style: oblique; margin-left: 1em; text-indent: 0; line-height: inherit; }
+.oc, .ac { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; box-sizing: border-box; vertical-align: middle; font-weight: bold; text-indent: 0; line-height: 1; }
+.oc { width: 13.05pt; height: 13.05pt; border: 0.7pt solid #000; font-size: 8pt; }
+.ac { width: 14.4pt; height: 14.4pt; background: #000; color: #fff; font-size: 11pt; }
+.opts { display: grid; column-gap: 0.5em; row-gap: 0.8em; align-items: center; padding-bottom: calc(var(--gap) + 1pt); }
+.opt { min-width: 0; text-align: left; }
+.opt-body { vertical-align: middle; }
+.opt img.pic { max-height: 1.4in; }
+.ans-cell { width: 14.4pt; }
+
+/* ----- CQ (tags/cq.typ) ----- */
+.cq-subq { padding-left: 0.4in; }
+.cq-section { text-align: center; font-weight: bold; padding: 8pt; margin-bottom: var(--gap); }
+.cq-section:not([style*="background"]) { background: #d9d9d9; }
+.cq-anshdr { font-weight: bold; }
+
+/* ===== App shell (screen only) ===== */
+* { box-sizing: border-box; }
+html, body.app { margin: 0; }
+body.app {
+  font-family: "Hind Siliguri", system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: #e9ebef;
+  color: #1d2330;
+}
+.page { box-sizing: content-box; }
+.page * { box-sizing: border-box; }
+.bar {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+  padding: 12px 16px;
+  background: #fff; border-bottom: 1px solid #d7dbe3;
+}
+.bar h1 { font-size: 16px; margin: 0 8px 0 0; font-weight: 600; }
+.bar label.opt-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+.bar input[type="text"] { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid #c8ced9; border-radius: 6px; width: min(340px, 100%); }
+.btn {
+  font: inherit; font-size: 14px; font-weight: 600;
+  padding: 8px 14px; border-radius: 8px; border: 1px solid #c8ced9; background: #fff; color: #1d2330; cursor: pointer;
+}
+.btn.primary { background: #c0392b; border-color: #c0392b; color: #fff; }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.file-btn { position: relative; overflow: hidden; }
+.file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.status { font-size: 13px; color: #4a5263; min-height: 18px; }
+.status.err { color: #b42318; }
+.summary { font-size: 13px; color: #4a5263; }
+.drop {
+  margin: 40px auto; max-width: 640px; padding: 48px 24px;
+  border: 2px dashed #b8c0ce; border-radius: 14px; background: #fff; text-align: center;
+}
+.drop.over { border-color: #c0392b; background: #fff6f5; }
+.drop h2 { margin: 0 0 8px; font-size: 20px; }
+.drop p { margin: 6px 0; color: #4a5263; font-size: 14px; line-height: 1.5; }
+#pages { display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 24px 16px 60px; }
+#pages .page { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18); }
+@media screen and (max-width: 900px) { #pages { zoom: 0.5; } }
+
+@page { size: 8.5in 10.6in; margin: 0; }
+@media print {
+  body.app { background: #fff; }
+  .bar, .drop, #measure { display: none !important; }
+  #pages { display: block; padding: 0; gap: 0; zoom: 1 !important; }
+  #pages .page { box-shadow: none; break-after: page; page-break-after: always; }
+  #pages .page:last-child { break-after: auto; page-break-after: auto; }
+}
