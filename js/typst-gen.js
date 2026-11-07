@@ -96,6 +96,7 @@
     opts = opts || {};
     const meta = Object.assign(guessMeta(opts.name), Object.fromEntries(Object.entries(opts.meta || {}).filter(([, v]) => v)));
     const media = createMedia(model, mediaPrefix(meta));
+    let zone = "normal";     // "normal" | "mcq" | "cq": the part being written
     const lines = [];        // main.typ body lines
     const fallback = [];     // same index: plain text that can replace the line, or null
     const warnings = [];
@@ -127,6 +128,48 @@
       }
     }
     for (const s of segs) register(s.blocks);
+
+    // A row of figures is often captioned by one line below it, the labels separated by tabs
+    // ("Fig: COBE <tab><tab> Fig: WMAP <tab><tab> Fig: Planck"): each label then goes under its figure.
+    const rowCaptionPass = () => {
+      for (const s of segs) {
+        const bs = s.blocks;
+        for (let k = 0; k < bs.length; k++) {
+          if (bs[k].kind !== "p") continue;
+          const row = rowOf(floatsOf(bs[k]));
+          if (row.length < 2) continue;
+          for (let j = k + 1; j < Math.min(bs.length, k + 12); j++) {
+            const c = bs[j];
+            if (c.kind !== "p") break;
+            if (!plainOf(c)) continue;
+            const groups = [[]];
+            for (const it of c.items) { if (it.t === "tab") { if (groups[groups.length - 1].length) groups.push([]); } else groups[groups.length - 1].push(it); }
+            const parts = groups.filter((g) => g.some((i) => i.t !== "text" || i.text.trim()));
+            if (parts.length === row.length && plainOf(c).length < 40 * row.length) { bs[k].rowCaptions = parts; c.captionOf = bs[k]; }
+            break;
+          }
+        }
+      }
+    };
+
+    // A caption is often a separate floating text box, anchored a few paragraphs below its picture but placed
+    // right under it (same left edge). Pair it with the picture so both stay together.
+    const isTextBox = (i) => i.t === "shape" && i.floating && i.el && i.el.localName === "wsp" && i.el.getElementsByTagNameNS("*", "txbxContent").length > 0;
+    for (const s of segs) {
+      const bs = s.blocks;
+      for (let k = 0; k < bs.length; k++) {
+        if (bs[k].kind !== "p") continue;
+        for (const f of bs[k].items) {
+          if (!(f.floating && f.x != null && (f.t === "img" || (f.t === "shape" && !isTextBox(f))))) continue;
+          for (let j = k; j < Math.min(bs.length, k + 6) && !f.caption; j++) {
+            if (bs[j].kind !== "p") continue;
+            const c = bs[j].items.find((i) => i !== f && isTextBox(i) && !i.consumed && i.x != null && i.cy / EMU_PT < 50 &&
+              Math.abs(i.x - f.x) < 20 && i.cx <= f.cx * 1.4 + 20 * EMU_PT && (j > k || (i.dy || 0) >= (f.dy || 0) + f.cy / EMU_PT - 30));
+            if (c) { f.caption = c; c.consumed = true; }
+          }
+        }
+      }
+    }
 
     // inline content of a paragraph on one line
     async function inline(items, b, o) {
@@ -164,7 +207,7 @@
           // an equation alone in its paragraph: Word draws it full size (display style) where the paragraph puts it
           add(it.display ? `$ ${body} $` : o.lone ? `$display(${body})$` : `$${body}$`, true);
         } else if (it.t === "img") add(await picture(it, false), true);
-        else if (it.t === "shape") { if (o.shapes) o.shapes.push(it); }
+        else if (it.t === "shape") { if (o.shapes && !it.consumed) o.shapes.push(it); }
         else if (it.t === "missing") add(`#box(stroke: 0.5pt + gray, inset: 3pt)[#text(size: 7pt, fill: gray)[${esc(it.what || "object")}]]`, true);
       }
       let s = pieces.join("").replace(/[ \t]+/g, " ").trim();
@@ -199,12 +242,12 @@
     }
 
     // ---------- text flowing beside a floating picture or drawing (Word's square wrapping) ----------
-    const wrapFloat = (b) => (b && b.kind === "p" && plainOf(b) ? b.items.find((i) => (i.t === "img" || i.t === "shape") && i.floating && i.wrap) : null);
+    const wrapFloat = (b) => (b && b.kind === "p" && plainOf(b) && rowOf(floatsOf(b)).length < 2 ? b.items.find((i) => (i.t === "img" || i.t === "shape") && i.floating && i.wrap && !i.consumed) : null);
     // the paragraphs after blocks[k] that Word keeps beside its floating picture f: as many lines as the
     // picture is tall (10pt Kalpurush: ~12pt lines, ~4.8pt a character), one or two more to be safe. Any that
     // do not fit beside it in Typst simply continue full width underneath.
     function followersFor(blocks, k, f, colW) {
-      const pw = f.cx / EMU_PT, ph = f.cy / EMU_PT + (f.dy || 0);
+      const pw = f.cx / EMU_PT, ph = f.cy / EMU_PT + (f.dy || 0) + (f.caption ? f.caption.cy / EMU_PT : 0);
       const perLine = Math.max(8, (colW - pw - 9) / 4.8);
       const lines = (x) => (loneMath(x.items) ? (/frac|sqrt|\//.test((x.items.find((i) => i.t === "math") || {}).tex || "") ? 2.5 : 1.4) : Math.max(1, Math.ceil(plainOf(x).length / perLine)));
       const ok = (x) => x && x.kind === "p" && (plainOf(x) || loneMath(x.items)) && !x.para.heading && !x.para.shd && !x.para.border && !wrapFloat(x) &&
@@ -217,12 +260,56 @@
     }
 
     // a normal paragraph (or picture line) -> one line
+    // a floating picture or drawing as code-mode content, with its caption text box under it
+    async function floatFig(f) {
+      const base = f.t === "shape" ? await drawing(f, { raw: true }) : (await picture(f, false)).slice(1);
+      if (!f.caption) return base;
+      const cap = await drawing(f.caption, { raw: true });
+      return cap ? `stack(spacing: 2pt, ${base}, ${cap})` : base;
+    }
+
+    const floatsOf = (b) => b.items.filter((i) => !i.consumed && ((i.t === "img" && i.floating) || (i.t === "shape" && i.floating && i.wrap)));
+
+    // floats of one paragraph that sit side by side at about the same height (Word positions known)
+    function rowOf(floats) {
+      const known = floats.filter((f) => f.x != null && f.cx > 0);
+      if (known.length < 2) return [];
+      const span = (f) => [f.dy || 0, (f.dy || 0) + f.cy / EMU_PT];
+      const first = span(known[0]);
+      const row = known.filter((f) => { const [a, z] = span(f); return a < first[1] - 10 && z > first[0] + 10; });
+      if (row.length < 2) return [];
+      // side by side: no two of them overlap much across
+      const xs = row.map((f) => [f.x, f.x + f.cx / EMU_PT]).sort((p, q) => p[0] - q[0]);
+      for (let i = 1; i < xs.length; i++) if (xs[i][0] < xs[i - 1][1] - 20) return [];
+      return row;
+    }
+
     async function paragraph(b, o) {
       o = o || {};
       // floating pictures: square/tight wrapping -> text flows beside the picture (wrap-pic);
       // other floating pictures get a line of their own before the paragraph
       // floating drawings (labelled boxes such as a "given data" panel) wrap like pictures
-      const floats = !o.inCell && plainOf(b) ? b.items.filter((i) => (i.t === "img" && i.floating) || (i.t === "shape" && i.floating && i.wrap)) : [];
+      if (b.captionOf) return []; // a caption line already drawn under its row of figures
+      // two or more floats at the same height (a row of figures): placed where Word puts them, under the text
+      const row = o.inCell ? [] : rowOf(floatsOf(b));
+      if (row.length >= 2) {
+        const rest = Object.assign({}, b, { items: b.items.filter((i) => !row.includes(i)) });
+        const out = plainOf(rest) || rest.items.some((i) => i.t === "img" || i.t === "shape") ? await paragraph(rest, o) : [];
+        const colW = Math.max(...row.map((f) => f.colW || 0)) || COL1;
+        const top = Math.min(...row.map((f) => f.dy || 0));
+        const caps = b.rowCaptions || [];
+        const byX = row.slice().sort((p, q) => p.x - q.x);
+        const figs = [];
+        for (const f of row) {
+          let fig = await floatFig(f);
+          const c = caps[byX.indexOf(f)];
+          if (c && c.length) fig = `stack(spacing: 4pt, ${fig}, box(width: ${pt(f.cx / EMU_PT)}, align(center, [${await inline(c, null)}])))`;
+          figs.push(`(${pt(f.x)}, ${pt((f.dy || 0) - top)}, ${fig})`);
+        }
+        out.push([`#float-row(${pt(colW)}, (${figs.join(", ")}))`, null]);
+        return out;
+      }
+      const floats = !o.inCell && plainOf(b) ? floatsOf(b) : [];
       if (floats.length) {
         const out = [];
         for (const f of floats.filter((f) => !f.wrap)) out.push([`#align(center, ${(await picture(f, true)).slice(1)})`, null]);
@@ -238,7 +325,7 @@
         let words = rest ? await wordsOf(rest.items, b) : [];
         // Word keeps flowing the next paragraphs beside a picture taller than its own paragraph
         for (const nb of followers) words = words.concat(words.length ? ["#parbreak()"] : [], await wordsOf(nb.items, nb));
-        let fig = f.t === "shape" ? await drawing(f, { raw: true }) : (await picture(f, false)).slice(1);
+        let fig = await floatFig(f);
         if (dy >= 1) fig = `pad(top: ${pt(dy)}, ${fig})`;
         const min = f.t === "shape" ? ", min-text: 0.8in" : "";
         out.push([`#wrap-pic(${fig}, side: ${f.wrap === "left" ? "left" : "right"}${min}, (${words.map((w) => `[${w}]`).join(", ")},))`,
@@ -258,11 +345,19 @@
         const out = [];
         for (const it of b.items) {
           if (it.t === "img") out.push([`#align(center, ${(await picture(it, true)).slice(1)})`, null]);
-          else if (it.t === "shape") { const d = await drawing(it); if (d) out.push([d, null]); }
+          else if (it.t === "shape" && !it.consumed) { const d = await drawing(it); if (d) out.push([d, null]); }
         }
         return out;
       }
-      let s = await inline(b.items, b, { shapes, keepSize: o.keepSize, lone });
+      const pa0 = b.para || {};
+      // a numbered paragraph in ordinary text: Word's indent, the label in the hanging space
+      const listed = pa0.list && zone === "normal" && !o.inCell && b.items[0] && b.items[0].label;
+      let s = await inline(listed ? b.items.slice(1) : b.items, b, { shapes, keepSize: o.keepSize, lone });
+      if (listed && s) {
+        const L = pa0.list;
+        const lab = await inline([Object.assign({}, b.items[0], { text: b.items[0].text.replace(/[\s\u00a0]+$/, "") })], b);
+        s = `#num-par(${pt(L.left)}, ${pt(L.hanging)}, ${L.jc === "right" ? "right" : L.jc === "center" ? "center" : "left"}, [${lab}], [${s}])`;
+      }
       if (!s) { const out = []; for (const sh of shapes) { const d = await drawing(sh); if (d) out.push([d, null]); } return out; }
       const pa = b.para || {};
       if (o.prefix) s = o.prefix(s);
@@ -342,6 +437,8 @@
       const c = fillEl && kids(fillEl)[0];
       if (!c) return null;
       if (c.localName === "srgbClr") return `rgb("#${c.getAttribute("val")}")`;
+      if (c.localName === "sysClr") return `rgb("#${c.getAttribute("lastClr") || (c.getAttribute("val") === "window" ? "FFFFFF" : "000000")}")`;
+      if (c.localName === "prstClr") { const v = (c.getAttribute("val") || "").toLowerCase(); return v === "white" ? "white" : v === "black" ? "black" : /^(gray|grey|silver)$/.test(v) ? "luma(128)" : "black"; }
       if (c.localName === "schemeClr") {
         const v = c.getAttribute("val");
         let l = /^(bg1|lt1)$/.test(v) ? 1 : /^(tx1|dk1)$/.test(v) ? 0 : 0.5;
@@ -440,7 +537,8 @@
         const inset = `(left: ${pt(ins("lIns", 91440))}, right: ${pt(ins("rIns", 91440))}, top: ${pt(ins("tIns", 45720))}, bottom: ${pt(ins("bIns", 45720))})`;
         const anchor = bodyPr && bodyPr.getAttribute("anchor");
         const v = anchor === "ctr" ? "horizon" : anchor === "b" ? "bottom" : "top";
-        const content = body ? `[#set par(leading: 0.35em, justify: false); #align(${v})[${body}]]` : "[]";
+        // lines measured down to the descender, so a box sized by its text holds all of it (same line pitch)
+        const content = body ? `[#set par(leading: 0.1em, justify: false); #set text(bottom-edge: "descender"); #align(${v})[${body}]]` : "[]";
         const W2 = pt(bx.w), H2 = pt(bx.h);
         const poly = polygonFor(prst, bx.w, bx.h);
         if (poly) {
@@ -451,7 +549,9 @@
         } else {
           const radius = /^(roundRect|flowChartAlternateProcess)$/.test(prst) ? pt(Math.min(bx.w, bx.h) * 0.16) : prst === "flowChartTerminator" ? pt(bx.h / 2) : "0pt";
           const r = `rect(width: ${W2}, height: ${H2}, fill: ${p.fill}, stroke: ${p.stroke}, radius: ${radius}, inset: ${inset})${content}`;
-          if (body && o && o.raw) texts.push({ bx, r, grow: `rect(width: ${W2}, fill: ${p.fill}, stroke: ${p.stroke}, radius: ${radius}, inset: ${inset})${content}` });
+          // grown version: at least the Word height (the 0pt-wide box), taller when the text needs it
+          const innerH = Math.max(0, bx.h - ins("tIns", 45720) - ins("bIns", 45720));
+          if (body && o && o.raw) texts.push({ bx, r, grow: `rect(width: ${W2}, fill: ${p.fill}, stroke: ${p.stroke}, radius: ${radius}, inset: ${inset}${p.fill !== "none" && p.stroke === "none" ? ", outset: 0.5pt" : ""})[#grid(columns: (0pt, 1fr), box(height: ${pt(innerH)}), ${content})]` });
           else place(bx.x0, bx.y0, r);
         }
       }
@@ -482,7 +582,8 @@
       // text flowing underneath never runs into it; it stays in the flow, at least as tall as the drawing
       if (o && o.raw && texts.length === 1) {
         const t = texts[0];
-        return `box(width: ${pt(W)})[${out.join(" ")} #grid(columns: (0pt, auto), box(height: ${pt(H)}), pad(left: ${pt(t.bx.x0)}, top: ${pt(t.bx.y0)}, ${t.grow}))]`;
+        // an invisible copy in the flow sets the height; the real one is placed last so it covers what is under it
+        return `box(width: ${pt(W)})[#grid(columns: (0pt, auto), box(height: ${pt(H)}), hide(pad(left: ${pt(t.bx.x0)}, top: ${pt(t.bx.y0)}, ${t.grow}))) ${out.join(" ")} #place(top + left, dx: ${pt(t.bx.x0)}, dy: ${pt(t.bx.y0)}, ${t.grow})]`;
       }
       for (const t of texts) place(t.bx.x0, t.bx.y0, t.r);
       if (o && o.raw) return `box(width: ${pt(W)}, height: ${pt(H)})[${out.join(" ")}]`;
@@ -573,7 +674,9 @@
     }
 
     // ---------- the document ----------
+    rowCaptionPass();
     let firstLabel = null;
+    zone = "normal";
     for (const seg of segs) {
       if (seg.type === "section") {
         if (firstLabel === null) { firstLabel = seg.label || ""; continue; }
@@ -582,11 +685,11 @@
       }
       if (seg.type === "mcq") {
         push("#apply-mcq[", null); push("#columns(2)[", null);
-        await mcqZone(seg);
+        zone = "mcq"; await mcqZone(seg); zone = "normal";
         push("]", null); push("]", null); blank();
       } else if (seg.type === "cq") {
         push("#apply-cq[", null); push("#columns(2)[", null);
-        await cqZone(seg);
+        zone = "cq"; await cqZone(seg); zone = "normal";
         push("]", null); push("]", null); blank();
       } else {
         for (let k = 0; k < seg.blocks.length; k++) {
@@ -728,14 +831,36 @@
     let mid = calc.ceil((lo + hi) / 2)
     if fits(mid) { lo = mid } else { hi = mid - 1 }
   }
+  // a paragraph break right after the text beside the picture belongs to neither part
+  while lo > 0 and words.at(lo - 1).func() == parbreak { lo -= 1 }
   // cut between two paragraphs: the part underneath starts a paragraph of its own
   let at-break = lo > 0 and lo < words.len() and words.at(lo).func() == parbreak
   let head = if lo == 0 { [] } else if lo < words.len() and not at-break { words.slice(0, lo).join([ ]) + linebreak(justify: true) } else { words.slice(0, lo).join([ ]) }
   let cells = if side == left { (fig, head) } else { (head, fig) }
   // the picture and the text beside it stay together (a page break between them would lose the picture)
   block(breakable: false, grid(columns: if side == left { (f.width, 1fr) } else { (1fr, f.width) }, column-gutter: gap, ..cells))
-  if at-break { words.slice(lo + 1).join([ ]) }
-  else if lo < words.len() { v(-par.spacing + 0.15em); words.slice(lo).join([ ]) }
+  let rest = words.slice(if at-break { lo + 1 } else { lo })
+  while rest.len() > 0 and rest.first().func() == parbreak { rest = rest.slice(1) }
+  // a paragraph cut in the middle continues on the next line, unless the picture reaches lower than the text
+  if not at-break and lo > 0 and rest.len() > 0 and measure(block(width: tw, head)).height >= f.height - 2pt { v(-par.spacing + 0.15em) }
+  rest.join([ ])
+})
+
+// a numbered paragraph as in Word: the text starts at left, the label sits in the hanging space before it
+#let num-par(left, hanging, label-align, label, body) = pad(left: left - hanging, {
+  set par(hanging-indent: hanging, first-line-indent: 0pt)
+  let gap = 0.3em
+  if hanging > 0pt { box(width: hanging, if label-align == right { align(right, label + h(gap)) } else { label + h(gap) }) } else { label + h(gap) }
+  body
+})
+
+// a row of floating pictures / drawings at their Word positions (x, y from the left of a Word column
+// colw wide), shrunk with the row when the Typst column is narrower
+#let float-row(colw, items) = layout(size => {
+  let s = calc.min(1, size.width / colw)
+  let h = calc.max(..items.map(i => i.at(1) + measure(i.at(2)).height))
+  block(breakable: false, scale(x: s * 100%, y: s * 100%, origin: top + left, reflow: true,
+    box(width: colw, height: h, { for i in items { place(top + left, dx: i.at(0), dy: i.at(1), i.at(2)) } })))
 })
 
 // ── Running chapter header ──────────────────────────────────────────────────

@@ -113,6 +113,17 @@
     return o;
   }
 
+  // <w:ind>: left (start), hanging / first-line, in points
+  function indOf(el) {
+    const v = (k) => { const x = wval(el, k); return x == null ? null : (parseInt(x, 10) || 0) / 20; };
+    const o = {};
+    const left = v("left") ?? v("start");
+    if (left != null) o.left = left;
+    if (v("hanging") != null) o.hanging = v("hanging");
+    else if (v("firstLine") != null) o.hanging = -v("firstLine");
+    return o;
+  }
+
   function paraProps(pPr) {
     const o = {};
     if (!pPr) return o;
@@ -127,7 +138,8 @@
       else if (n === "numPr") {
         const id = wval(wkid(c, "numId")), lvl = wval(wkid(c, "ilvl"));
         o.num = { id, lvl: parseInt(lvl || "0", 10) };
-      } else if (n === "pBdr") o.border = kids(c).some((b) => wval(b) && wval(b) !== "none" && wval(b) !== "nil");
+      } else if (n === "ind") o.ind = indOf(c);
+      else if (n === "pBdr") o.border = kids(c).some((b) => wval(b) && wval(b) !== "none" && wval(b) !== "nil");
       else if (n === "rPr") o.markRun = runProps(c);
     }
     return o;
@@ -152,10 +164,14 @@
     for (const a of Array.from(doc.getElementsByTagNameNS(W, "abstractNum"))) {
       const lvls = {};
       for (const l of kids(a).filter((x) => x.localName === "lvl")) {
+        const ind = wkid(wkid(l, "pPr"), "ind");
         lvls[parseInt(wval(l, "ilvl"), 10)] = {
           fmt: wval(wkid(l, "numFmt")) || "decimal",
           text: wval(wkid(l, "lvlText")) ?? "",
           start: parseInt(wval(wkid(l, "start")) || "1", 10),
+          ind: ind ? indOf(ind) : null,           // the level's own indents (points)
+          jc: wval(wkid(l, "lvlJc")) || "left",   // label alignment in the hanging space
+          run: runProps(wkid(l, "rPr")),          // label formatting (often bold)
         };
       }
       abstract[wval(a, "abstractNumId")] = lvls;
@@ -204,6 +220,7 @@
       const def = lvls[lvl] || { fmt: "decimal", text: `%${lvl + 1}.`, start: 1 };
       c[lvl] = c[lvl] === undefined ? def.start : c[lvl] + 1;
       for (let k = lvl + 1; k < 9; k++) c[k] = undefined;
+      label.lastDef = def;
       if (def.fmt === "bullet") return "•";
       return def.text.replace(/%(\d)/g, (_, d) => {
         const li = parseInt(d, 10) - 1;
@@ -339,13 +356,20 @@
       else merged.push(it);
     }
     const label = sp.num ? ctx.numLabel(sp.num) : null;
-    if (label) merged.unshift({ t: "text", text: label + " ", b: false });
+    let list = null;
+    if (label) {
+      const def = ctx.numLabel.lastDef || {};
+      merged.unshift(Object.assign({ t: "text", text: label + " ", b: false, label: true }, def.run || {}));
+      // indents: the numbering level's, overridden by the paragraph's own (style indents come first)
+      const ind = Object.assign({}, styleChain(st, styleId, "p").ind || {}, def.ind || {}, direct.ind || {});
+      if (ind.left > 0) list = { left: ind.left, hanging: Math.max(0, Math.min(ind.left, ind.hanging || 0)), jc: def.jc || "left" };
+    }
 
     const text = merged.map((it) => (it.t === "text" ? it.text : it.t === "br" ? "\n" : OBJ)).join("");
     const textRuns = merged.filter((it) => it.t === "text" && it.text.trim());
     const para = {
       jc: sp.jc || "", shd: sp.shd || "", border: !!sp.border, keepNext: !!sp.keepNext,
-      pageBreakBefore: !!sp.pageBreakBefore, styleName,
+      pageBreakBefore: !!sp.pageBreakBefore, styleName, list,
       heading: headingLevel(styleName, sp.outline),
       allBold: textRuns.length > 0 && textRuns.every((r) => r.b),
       maxSize: Math.max(0, ...textRuns.map((r) => r.sz || 0)),
@@ -451,12 +475,15 @@
     const posH = kids(anchor).find((c) => c.localName === "positionH");
     const posV = kids(anchor).find((c) => c.localName === "positionV");
     let side = "right";
+    let x = null; // left edge in points from the left of the text column, when known
     if (posH) {
       const align = kids(posH).find((c) => c.localName === "align");
       const off = kids(posH).find((c) => c.localName === "posOffset");
-      if (align) side = /left|inside/.test(align.textContent) ? "left" : "right";
-      else if (off) {
-        let x = (parseInt(off.textContent, 10) || 0) / 12700;
+      if (align) {
+        side = /left|inside/.test(align.textContent) ? "left" : "right";
+        if (ctx && ctx.colW) x = /left|inside/.test(align.textContent) ? 0 : /center/.test(align.textContent) ? (ctx.colW - cx / 12700) / 2 : ctx.colW - cx / 12700;
+      } else if (off) {
+        x = (parseInt(off.textContent, 10) || 0) / 12700;
         if (ctx && ctx.colW) {
           // the text goes on the wider side; the picture sits on the other one
           const from = posH.getAttribute("relativeFrom");
@@ -470,7 +497,7 @@
       const off = kids(posV).find((c) => c.localName === "posOffset");
       if (off) dy = Math.max(0, (parseInt(off.textContent, 10) || 0) / 12700);
     }
-    return { wrap: wrapped ? side : "", dy };
+    return { wrap: wrapped ? side : "", dy, x, colW: (ctx && ctx.colW) || 0 };
   }
 
   function picItem(pic, ctx) {
