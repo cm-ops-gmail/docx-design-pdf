@@ -1,4 +1,4 @@
-/* HTML Studio: .docx -> HTML + CSS project, live paged preview, print to PDF, zip download. */
+/* HTML: .docx -> HTML + CSS project, live paged preview, print to PDF, zip download. */
 (function (root) {
   "use strict";
 
@@ -171,5 +171,5 @@
   // the picture cache of the renderer belongs to one document, so a new file starts from a fresh page
   $("new").addEventListener("click", () => location.reload());
 
-  root.HTMLStudio = { load, project: () => project, preview };
+  root.HTMLApp = { load, project: () => project, preview };
 })(typeof globalThis !== "undefined" ? globalThis : this);

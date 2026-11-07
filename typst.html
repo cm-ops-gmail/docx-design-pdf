@@ -3,18 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Typst Studio</title>
+<title>Word → Typst</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23239dad'/%3E%3Ctext x='32' y='44' font-size='34' text-anchor='middle' fill='white' font-family='Georgia'%3Et%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/dialog/dialog.min.css">
 <link rel="stylesheet" href="css/app.css">
-<link rel="stylesheet" href="css/studio.css">
+<link rel="stylesheet" href="css/workspace.css">
 </head>
-<body class="studio">
+<body class="workspace">
   <header class="topbar">
     <div class="brand">
       <span class="mark" aria-hidden="true" style="background:#239dad"><span>t</span></span>
       <div>
-        <div class="brand-name">Typst Studio</div>
+        <div class="brand-name">Word → Typst</div>
         <div class="brand-sub">Word in → editable Typst code → PDF, all in the browser</div>
       </div>
     </div>
@@ -26,17 +27,17 @@
   </header>
 
   <!-- start -->
-  <section id="start" class="studio-start">
+  <section id="start" class="start-screen">
     <div class="wrap">
       <div>
         <h2>Turn a Word file into a Typst project</h2>
         <p class="lede">You get the same project layout the Python converter made: editable code, a media folder, live PDF preview. If the compiler rejects a line, it is repaired automatically and shown to you.</p>
       </div>
       <label id="drop" class="drop" tabindex="0">
-        <input id="file" type="file" accept=".docx,.docm,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+        <input id="file" type="file" multiple accept=".docx,.docm,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
         <span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 48 48" width="44" height="44"><path d="M14 6h14l10 10v24a2 2 0 0 1-2 2H14a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><path d="M28 6v10h10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><path d="M24 34V22m-5 5 5-5 5 5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         <span class="drop-title">Drop a Word file here</span>
-        <span class="drop-sub">or <u>choose a .docx</u>. It never leaves this browser.</span>
+        <span class="drop-sub">or <u>choose a .docx</u>. Several at once make one zip with a project and a PDF for each chapter. Nothing leaves this browser.</span>
       </label>
       <div class="opt-row">
         <label class="switch"><input id="grey" type="checkbox" checked> <span>Greyscale pictures (as in the Typst output)</span></label>
@@ -47,7 +48,12 @@
         <div class="field"><label for="meta-chapter">Chapter</label><div class="input"><input id="meta-chapter" type="number" min="1" placeholder="from the file name"></div></div>
       </div>
       <p class="meta-note">Pictures are named the way the Python converter names them: <code id="meta-sample">class_subject_ch01_img001.png</code></p>
+      <div id="resume" class="card resume" hidden>
+        <div><strong>Continue where you left off?</strong><div class="resume-sub"><span id="resume-name"></span> · saved <span id="resume-when"></span>, with your edits</div></div>
+        <span class="resume-btns"><button id="resume-go" class="btn btn-primary btn-sm" type="button">Continue</button><button id="resume-forget" class="btn btn-quiet btn-sm" type="button">Forget it</button></span>
+      </div>
       <div id="loading" class="card loading" hidden><span class="spinner"></span><span id="loading-text">Working…</span></div>
+      <ol id="batch" class="card batch" hidden></ol>
       <div class="card tree-card">
         <h3>What you get</h3>
         <ul>
@@ -65,7 +71,7 @@
   <!-- workspace -->
   <section id="workspace" class="workspace" hidden>
     <aside class="pane">
-      <div class="pane-head"><h3>Project</h3></div>
+      <div class="pane-head"><h3>Project</h3><span id="project-name" class="project-name"></span></div>
       <div id="files" class="files"></div>
       <div class="pane-head" style="border-top:1px solid var(--line);border-bottom:0">
         <button id="new" class="btn btn-quiet btn-sm" type="button">Open another .docx</button>
@@ -82,12 +88,13 @@
     <section class="pane pane-preview">
       <div class="pane-head">
         <h3>PDF</h3>
+        <label class="page-nav" title="Go to page"><input id="page-no" type="number" min="1" value="1" aria-label="Page"> / <span id="page-count">–</span></label>
         <span class="zoom">
           <button id="zoom-out" class="btn btn-quiet btn-sm" type="button" title="Zoom out">−</button>
           <button id="zoom-fit" class="btn btn-quiet btn-sm" type="button" title="Fit width"><span id="zoom-label">Fit</span></button>
           <button id="zoom-in" class="btn btn-quiet btn-sm" type="button" title="Zoom in">+</button>
         </span>
-        <button id="compile" class="btn btn-quiet btn-sm" type="button" title="Compile now (Ctrl/Cmd + S)">Compile</button>
+        <button id="compile" class="btn btn-quiet btn-sm" type="button" title="Compile now (Ctrl/Cmd + S). In the editor: Ctrl/Cmd + F find, Shift + Ctrl/Cmd + F replace, Alt + G go to line">Compile</button>
         <button id="dl-pdf" class="btn btn-quiet btn-sm" type="button" disabled>Download PDF</button>
         <button id="dl-zip" class="btn btn-primary btn-sm" type="button" disabled>Download project (.zip)</button>
       </div>
@@ -98,6 +105,9 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/searchcursor.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/dialog/dialog.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/search.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/jump-to-line.min.js"></script>
   <script src="js/assets.js"></script>
   <script src="js/omml.js"></script>
   <script src="js/omml-typst.js"></script>
@@ -114,7 +124,7 @@
   <script src="js/typst-app.js"></script>
   <script type="module">
     import { $typst, TypstSnippet } from "https://cdn.jsdelivr.net/npm/@myriaddreamin/typst.ts@0.6.0/dist/esm/contrib/all-in-one-lite.bundle.js";
-    window.TypstStudio.attachCompiler($typst, TypstSnippet);
+    window.TypstApp.attachCompiler($typst, TypstSnippet);
   </script>
 </body>
 </html>

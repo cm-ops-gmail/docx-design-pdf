@@ -1,4 +1,4 @@
-# Typst Studio and HTML Studio
+# Typst and HTML tools
 
 Two pages next to the styler (`index.html`, unchanged). Open them in Chrome or Edge. Double-clicking works.
 
@@ -14,11 +14,19 @@ Two pages next to the styler (`index.html`, unchanged). Open them in Chrome or E
    This works through invisible position markers that are added only while compiling. Your files and downloads never contain them, and tests showed they move no word on any page.
 4. **Download project (.zip)** gives the folder. **Download PDF** gives the current PDF.
 
+More in the Typst page:
+
+- **Several chapters at once.** Choose or drop more than one .docx. You get one zip with a PDF for each chapter at the top and a full Typst project folder for each. Lines the compiler rejects are repaired the same way as in the editor, and the list shows how each chapter went.
+- **Continue where you left off.** The open project, with your edits, is kept in this browser. Reopen the page and click **Continue**, or **Forget it** to clear it. Nothing is uploaded.
+- **Find and replace** in the editor: Ctrl/Cmd + F find, Shift + Ctrl/Cmd + F replace (Cmd + Alt + F on a Mac), Alt + G go to a line.
+- **Page box** above the preview shows the page you are on; type a number to jump there.
+- **Picture names** follow the Python converter: `<class>_<subject>_ch<NN>_img<NNN>.png`, greyscale in `media/`, colour in `media_color/`. Class, Subject and Chapter are guessed from the file name when left blank; what you type is remembered, and so is the greyscale switch.
+
 ```
 main.typ                  the document, one block per line
 page_setup_template.typ   base tokens, page size and margins, header, footer, option grids
 tags/mcq.typ  tags/cq.typ MCQ and CQ tokens (circle sizes, hanging indent, cq-indent …)
-media/                    pictures from the Word file
+media/  media_color/      pictures in greyscale and in colour (media-folder in page_setup_template.typ picks one)
 templates/                logos
 fonts/kalpurush.ttf
 <name>.pdf

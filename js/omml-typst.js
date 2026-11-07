@@ -36,6 +36,8 @@
   const ACC = { "̂": "hat", "^": "hat", "̃": "tilde", "~": "tilde", "̄": "macron", "¯": "macron", "̅": "overline", "⃗": "arrow", "→": "arrow", "̇": "dot", "˙": "dot", "̈": "dot.double", "¨": "dot.double", "̌": "caron", "ˇ": "caron", "́": "acute", "´": "acute", "̀": "grave", "`": "grave", "̆": "breve" };
   const FUNCS = new Set(["sin", "cos", "tan", "cot", "sec", "csc", "log", "ln", "exp", "lim", "max", "min", "sup", "inf", "det", "gcd", "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh", "mod"]);
   const ARROWS = { "→": "arrow.r", "⟶": "arrow.r.long", "←": "arrow.l", "⟵": "arrow.l.long", "↔": "arrow.l.r", "⇒": "arrow.r.double", "⇐": "arrow.l.double", "⇔": "arrow.l.r.double", "⇌": "harpoons.rtlb" };
+  // letters and marks of scripts Typst math has no names for (Bangla, Devanagari …), plus ZWJ / ZWNJ
+  const WORD = /[ऀ-෿‌‍]/;
   const SUBS = "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎", SUBS_TO = "0123456789+-=()";
   const SUPS = "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿⁱ", SUPS_TO = "0123456789+-=()ni";
 
@@ -71,6 +73,15 @@
         continue;
       }
       if (/[0-9]/.test(c)) { let s = ""; while (i < chars.length && /[0-9.]/.test(chars[i])) s += chars[i++]; out.push(s); continue; }
+      // Bangla (and other script) words stay one quoted string with their spaces, so conjuncts and vowel
+      // signs shape together instead of coming out letter by letter
+      if (WORD.test(c)) {
+        let j = i;
+        while (j < chars.length && (WORD.test(chars[j]) || (chars[j] === " " && WORD.test(chars[j + 1] || "")))) j++;
+        out.push(quote(chars.slice(i, j).join("")));
+        i = j;
+        continue;
+      }
       out.push(ch(c));
       i++;
     }

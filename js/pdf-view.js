@@ -5,7 +5,7 @@
 
   const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
   let host = null, doc = null, pages = [], scale = 0, fit = true, pageSize = null;
-  let observer = null, generation = 0, onClick = null;
+  let observer = null, generation = 0, onClick = null, onPage = null, shownPage = 0;
   let ready = null;
 
   // pdf.js and its worker (a cross-origin worker is not allowed, so it runs from a blob)
@@ -19,11 +19,27 @@
     return ready;
   }
 
-  function init(el, clickHandler) {
+  // pageHandler(n, total): the page at the middle of the view, whenever it changes
+  function init(el, clickHandler, pageHandler) {
     host = el;
     onClick = clickHandler;
+    onPage = pageHandler || null;
     load();
     new ResizeObserver(() => { if (fit && doc) relayout(); }).observe(host);
+    host.addEventListener("scroll", reportPage, { passive: true });
+  }
+
+  function reportPage(force) {
+    if (!onPage || !pages.length) return;
+    const mid = host.scrollTop + host.clientHeight / 2;
+    let n = 1;
+    for (const p of pages) { if (p.wrap.offsetTop <= mid) n = p.wrap._n; else break; }
+    if (n !== shownPage || force === true) { shownPage = n; onPage(n, pages.length); }
+  }
+
+  function goTo(n) {
+    const p = pages[Math.min(Math.max(1, n), pages.length) - 1];
+    if (p) host.scrollTo({ top: p.wrap.offsetTop - 12, behavior: "smooth" });
   }
 
   const fitScale = () => Math.max(0.2, (host.clientWidth - 36) / pageSize.w);
@@ -69,6 +85,7 @@
       pages.push({ wrap, drawn: 0 });
       observer.observe(wrap);
     }
+    requestAnimationFrame(() => reportPage(true));
   }
 
   async function draw(n) {
@@ -120,5 +137,5 @@
     setTimeout(() => bar.remove(), 1600);
   }
 
-  root.PdfView = { init, show, zoom, scrollTo };
+  root.PdfView = { init, show, zoom, scrollTo, goTo };
 })(typeof globalThis !== "undefined" ? globalThis : this);

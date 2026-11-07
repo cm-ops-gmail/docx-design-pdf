@@ -22,6 +22,8 @@ Everything runs in the browser tab. No Typst, no Python, no server, and the file
 
 `pdf.html` is the older tool, which makes a PDF in the full Typst page design.
 
+`typst.html` (Word → Typst) and `html.html` (Word → HTML) turn the Word file into an editable project with a live PDF preview. The Typst page also converts several chapters at once into one zip. See [TOOLS.md](TOOLS.md).
+
 ## Settings
 
 The **Settings** tab has the same values you would edit in the Typst templates. Each field shows the Typst token it stands for (`opt-circle-size`, `cq-indent`, `header-ascent` …). A live preview of an odd or even page updates as you type. Values save automatically in this browser. **Export** / **Import** move them to another computer, and **Reset** goes back to the Typst values.
@@ -72,7 +74,7 @@ On two tagged books, the parts found matched the hand-placed tags exactly.
 
 ## Questions export
 
-The styler's **Download questions (.zip)** button, and the `questions/` folder in the Typst and HTML Studio zips, contain the questions extracted the way the MCQ/SQ scrapper does it (its own code, in `js/scrapper/`), laid out like the Typst converter's output folder:
+The styler's **Download questions (.zip)** button, and the `questions/` folder in the Typst and HTML zips, contain the questions extracted the way the MCQ/SQ scrapper does it (its own code, in `js/scrapper/`), laid out like the Typst converter's output folder:
 
 | File / folder | Content |
 |---|---|

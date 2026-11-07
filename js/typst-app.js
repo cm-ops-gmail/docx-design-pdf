@@ -1,4 +1,4 @@
-/* Typst Studio: .docx -> Typst project, live compile in the browser (typst.ts), auto-repair, zip download. */
+/* Typst: .docx -> Typst project, live compile in the browser (typst.ts), auto-repair, zip download. */
 (function (root) {
   "use strict";
 
@@ -303,51 +303,41 @@
     $("meta-sample").textContent = TypstGen.mediaPrefix(m) + "_img001.png";
     for (const [id, k] of [["meta-class", "className"], ["meta-subject", "subjectName"], ["meta-chapter", "chapterNumber"]]) if (m[k]) $(id).placeholder = String(m[k]);
   }
-  ["meta-class", "meta-subject", "meta-chapter"].forEach((id) => $(id).addEventListener("input", () => showPrefix({})));
+  // the fields and the greyscale switch are remembered in this browser
+  const PREF = "word-typst-prefs";
+  try {
+    const pr = JSON.parse(localStorage.getItem(PREF) || "{}");
+    for (const id of ["meta-class", "meta-subject", "meta-chapter"]) if (pr[id]) $(id).value = pr[id];
+    if (typeof pr.grey === "boolean") $("grey").checked = pr.grey;
+  } catch (e) { /* storage blocked: defaults */ }
+  const savePrefs = () => {
+    try { localStorage.setItem(PREF, JSON.stringify({ "meta-class": $("meta-class").value, "meta-subject": $("meta-subject").value, "meta-chapter": $("meta-chapter").value, grey: $("grey").checked })); } catch (e) { /* ignore */ }
+  };
+  ["meta-class", "meta-subject", "meta-chapter"].forEach((id) => $(id).addEventListener("input", () => { showPrefix({}); savePrefs(); }));
+  $("grey").addEventListener("change", savePrefs);
   showPrefix({});
 
   // ---------- load a .docx ----------
+  // Word file -> project (code, media, fallback lines); no compiling here
+  async function makeProject(file, say) {
+    say("Reading " + file.name + "…");
+    const data = await file.arrayBuffer();
+    const model = await DocxReader.read(data);
+    say("Finding MCQ and CQ parts…");
+    const segs = Classify.segment(model.blocks);
+    say("Writing the Typst code and the media folder…");
+    const gen = await TypstGen.generate(model, segs, { greyscale: $("grey").checked, name: file.name, meta: metaFields() });
+    return Object.assign({ data, fileName: file.name, name: file.name.replace(/\.(docx|docm)$/i, "") }, gen);
+  }
+
   async function load(file) {
     $("loading").hidden = false;
     const say = (t) => ($("loading-text").textContent = t);
     try {
-      say("Reading the Word file…");
-      const data = await file.arrayBuffer();
-      const model = await DocxReader.read(data);
-      say("Finding MCQ and CQ parts…");
-      const segs = Classify.segment(model.blocks);
-      say("Writing the Typst code and the media folder…");
-      const gen = await TypstGen.generate(model, segs, { greyscale: $("grey").checked, name: file.name, meta: metaFields() });
-      showPrefix(gen.meta);
-      project = Object.assign({ data, fileName: file.name, name: file.name.replace(/\.(docx|docm)$/i, "") }, gen);
-      repaired.clear();
+      const p = await makeProject(file, say);
+      showPrefix(p.meta);
       say("Loading the Typst compiler (first time only, about 20 MB)…");
-      await compilerReady;
-      await typst.resetShadow();
-      await mapProject();
-
-      $("start").hidden = true;
-      $("workspace").hidden = false;
-      if (!cm) {
-        defineMode();
-        cm = CodeMirror($("editor"), { lineNumbers: true, lineWrapping: true, mode: "typst", tabSize: 2, indentUnit: 2 });
-        cm.on("change", () => {
-          if (current === "main.typ") project.files["main.typ"] = cm.getValue();
-          clearTimeout(timer);
-          timer = setTimeout(() => compile(false), 900);
-        });
-        cm.setOption("extraKeys", { "Cmd-S": () => compile(false), "Ctrl-S": () => compile(false) });
-        cm.on("cursorActivity", syncPreview);
-        root.PdfView.init($("viewer"), (c) => {
-          const l = lineAt(c);
-          if (l != null) jumpToLine(l);
-        });
-      }
-      for (const p of TEXT_FILES) docs[p] = CodeMirror.Doc(project.files[p], "typst");
-      buildFiles();
-      open("main.typ");
-      if (gen.warnings.length) setStatus("", gen.warnings[0]);
-      await compile(true);
+      await openProject(p, []);
     } catch (e) {
       console.error(e);
       say("Could not convert this file: " + (e && e.message ? e.message : e));
@@ -355,6 +345,174 @@
       return;
     }
     $("loading").hidden = true;
+  }
+
+  // show a project in the workspace and compile it (repairs: main.typ lines already replaced by plain text)
+  async function openProject(p, repairs) {
+    project = p;
+    repaired.clear();
+    for (const l of repairs || []) repaired.add(l);
+    await compilerReady;
+    await typst.resetShadow();
+    await mapProject();
+
+    $("start").hidden = true;
+    $("workspace").hidden = false;
+    if (!cm) {
+      defineMode();
+      cm = CodeMirror($("editor"), { lineNumbers: true, lineWrapping: true, mode: "typst", tabSize: 2, indentUnit: 2 });
+      cm.on("change", () => {
+        if (current === "main.typ") project.files["main.typ"] = cm.getValue();
+        clearTimeout(timer);
+        timer = setTimeout(() => compile(false), 900);
+        autosave();
+      });
+      // Ctrl/Cmd+F find, Shift+Ctrl/Cmd+F (Cmd+Alt+F on a Mac) replace, Alt+G go to line: CodeMirror's search addon
+      cm.setOption("extraKeys", { "Cmd-S": () => compile(false), "Ctrl-S": () => compile(false), "Alt-G": "jumpToLine" });
+      cm.on("cursorActivity", syncPreview);
+      root.PdfView.init($("viewer"), (c) => {
+        const l = lineAt(c);
+        if (l != null) jumpToLine(l);
+      }, (n, total) => { $("page-no").value = n; $("page-no").max = total; $("page-count").textContent = total; });
+    }
+    for (const k of TEXT_FILES) docs[k] = CodeMirror.Doc(project.files[k], "typst");
+    buildFiles();
+    open("main.typ");
+    $("project-name").textContent = project.name;
+    if (project.meta) showPrefix(project.meta);
+    if (project.warnings && project.warnings.length) setStatus("", project.warnings[0]);
+    await compile(!(repairs && repairs.length));
+    autosave(true);
+  }
+
+  // ---------- autosave: the open project (code, pictures, the Word file) is kept in this browser ----------
+  // Reopening the page offers to continue where you left off. Nothing leaves the browser.
+  const DB = { name: "word-typst", store: "projects", key: "last" };
+  function idb(mode, fn) {
+    return new Promise((res, rej) => {
+      const rq = indexedDB.open(DB.name, 1);
+      rq.onupgradeneeded = () => rq.result.createObjectStore(DB.store);
+      rq.onerror = () => rej(rq.error);
+      rq.onsuccess = () => {
+        const tx = rq.result.transaction(DB.store, mode);
+        const r = fn(tx.objectStore(DB.store));
+        tx.oncomplete = () => { rq.result.close(); res(r && r.result); };
+        tx.onerror = () => { rq.result.close(); rej(tx.error); };
+      };
+    });
+  }
+  let saveTimer = null;
+  function autosave(now) {
+    if (!project) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      const files = {};
+      for (const k of TEXT_FILES) files[k] = docs[k] ? docs[k].getValue() : project.files[k];
+      const keep = { name: project.name, fileName: project.fileName, data: project.data, files, binaries: project.binaries, fallback: project.fallback,
+        warnings: project.warnings, meta: project.meta, prefix: project.prefix, repaired: [...repaired], savedAt: Date.now() };
+      try { await idb("readwrite", (st) => st.put(keep, DB.key)); } catch (e) { console.warn("autosave failed", e); }
+    }, now ? 0 : 1500);
+  }
+  async function showResume() {
+    let last = null;
+    try { last = await idb("readonly", (st) => st.get(DB.key)); } catch (e) { return; }
+    if (!last || !last.files) return;
+    $("resume").hidden = false;
+    $("resume-name").textContent = last.name;
+    $("resume-when").textContent = new Date(last.savedAt).toLocaleString();
+    $("resume-go").onclick = async () => {
+      $("resume").hidden = true;
+      $("loading").hidden = false;
+      $("loading-text").textContent = "Opening " + last.name + "…";
+      try { await openProject(Object.assign({}, last), last.repaired); $("loading").hidden = true; }
+      catch (e) { console.error(e); $("loading-text").textContent = "Could not open the saved project: " + (e && e.message ? e.message : e); }
+    };
+    $("resume-forget").onclick = async () => { $("resume").hidden = true; try { await idb("readwrite", (st) => st.delete(DB.key)); } catch (e) { /* ignore */ } };
+  }
+
+  // ---------- batch: several Word files -> one zip with a Typst project and a PDF for each ----------
+  // compile a project on its own, replacing lines the compiler rejects by their plain text (as the editor does)
+  async function buildPdf(p, say) {
+    await compilerReady;
+    await typst.resetShadow();
+    for (const [k, data] of Object.entries(p.binaries)) await typst.mapShadow("/" + k, data);
+    const files = Object.assign({}, p.files);
+    const lines = files["main.typ"].split("\n");
+    const fixed = new Set();
+    const compiler = await typst.getCompiler();
+    for (let round = 0; round < 60; round++) {
+      files["main.typ"] = lines.join("\n");
+      for (const k of TEXT_FILES) await typst.addSource("/" + k, files[k]);
+      const res = await compiler.compile({ mainFilePath: "/main.typ", format: "pdf", diagnostics: "full" });
+      const errs = (res.diagnostics || []).filter((d) => d.severity === "error");
+      if (!errs.length) return { pdf: res.result, files, repaired: fixed.size };
+      const bad = errs.map((d) => ((d.path || "").replace(/^\//, "") === "main.typ" && /^(\d+):/.test(d.range || "") ? +/^(\d+):/.exec(d.range)[1] : -1))
+        .filter((l) => l >= 0 && p.fallback[l] != null && !fixed.has(l));
+      if (!bad.length) return { pdf: null, files, repaired: fixed.size, error: errs[0].message };
+      const l = Math.min(...bad);
+      const fb = p.fallback[l];
+      lines[l] = fb ? "#" + JSON.stringify(fb) : "";
+      fixed.add(l);
+      say(`${p.name}: repairing line ${l + 1}…`);
+    }
+    return { pdf: null, files, repaired: fixed.size, error: "too many lines the compiler could not read" };
+  }
+
+  async function batch(list) {
+    const box = $("batch");
+    $("loading").hidden = false;
+    box.hidden = false;
+    box.textContent = "";
+    const say = (t) => ($("loading-text").textContent = t);
+    const zip = new JSZip();
+    const rows = [];
+    for (let i = 0; i < list.length; i++) {
+      const f = list[i];
+      const row = document.createElement("li");
+      row.textContent = f.name + " — waiting";
+      box.appendChild(row);
+      rows.push(row);
+    }
+    let ok = 0;
+    for (let i = 0; i < list.length; i++) {
+      const f = list[i], row = rows[i];
+      row.className = "busy";
+      row.textContent = f.name + " — converting…";
+      try {
+        say(`(${i + 1}/${list.length}) ${f.name}`);
+        const p = await makeProject(f, (t) => say(`(${i + 1}/${list.length}) ${t}`));
+        say(`(${i + 1}/${list.length}) Compiling ${p.name}…`);
+        const r = await buildPdf(p, (t) => say(`(${i + 1}/${list.length}) ${t}`));
+        const dir = zip.folder(p.name + "_typst");
+        for (const [k, v] of Object.entries(r.files)) dir.file(k, v);
+        for (const [k, v] of Object.entries(p.binaries)) dir.file(k, v);
+        if (r.pdf) { dir.file(p.name + ".pdf", r.pdf); zip.file(p.name + ".pdf", r.pdf); ok++; }
+        row.className = r.pdf ? "ok" : "err";
+        row.textContent = `${f.name} — ${r.pdf ? "done" : "project only, the PDF failed: " + r.error}${r.repaired ? ` (${r.repaired} line${r.repaired > 1 ? "s" : ""} repaired)` : ""} · pictures ${p.prefix}_img…`;
+      } catch (e) {
+        console.error(e);
+        row.className = "err";
+        row.textContent = `${f.name} — could not convert: ${e && e.message ? e.message : e}`;
+      }
+    }
+    say("Packing the zip…");
+    const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
+    save(blob, `typst_${list.length}_chapters.zip`);
+    say(`Done: ${ok} of ${list.length} PDFs. The zip has a PDF for each chapter at the top and a project folder for each.`);
+    $("loading").querySelector(".spinner").hidden = true;
+    root.__batchDone = { ok, total: list.length };
+    // the open project (if any) needs its own files back in the compiler
+    if (project) { await typst.resetShadow(); await mapProject(); }
+  }
+
+  function take(files) {
+    const list = [...(files || [])].filter((x) => /\.(docx|docm)$/i.test(x.name));
+    if (!list.length) return;
+    $("workspace").hidden = true;
+    $("start").hidden = false;
+    $("batch").hidden = true;
+    $("loading").querySelector(".spinner").hidden = false;
+    if (list.length === 1) load(list[0]); else batch(list);
   }
 
   // ---------- downloads ----------
@@ -390,21 +548,20 @@
   }
 
   // ---------- wiring ----------
-  $("file").addEventListener("change", (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) load(f); });
+  $("file").addEventListener("change", (e) => { const f = [...e.target.files]; e.target.value = ""; take(f); });
   $("drop").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("file").click(); } });
   ["dragenter", "dragover"].forEach((ev) => document.addEventListener(ev, (e) => { e.preventDefault(); $("drop").classList.add("over"); }));
   ["dragleave", "drop"].forEach((ev) => document.addEventListener(ev, (e) => { e.preventDefault(); $("drop").classList.remove("over"); }));
-  document.addEventListener("drop", (e) => {
-    const f = [...(e.dataTransfer.files || [])].find((x) => /\.(docx|docm)$/i.test(x.name));
-    if (f) { $("workspace").hidden = true; $("start").hidden = false; load(f); }
-  });
+  document.addEventListener("drop", (e) => take(e.dataTransfer.files));
   $("compile").addEventListener("click", () => compile(false));
   $("zoom-in").addEventListener("click", () => root.PdfView.zoom(1));
   $("zoom-out").addEventListener("click", () => root.PdfView.zoom(-1));
   $("zoom-fit").addEventListener("click", () => root.PdfView.zoom(0));
   $("dl-zip").addEventListener("click", downloadZip);
   $("dl-pdf").addEventListener("click", () => lastPdf && save(new Blob([lastPdf], { type: "application/pdf" }), project.name + ".pdf"));
-  $("new").addEventListener("click", () => { $("workspace").hidden = true; $("start").hidden = false; $("loading").hidden = true; $("file").click(); });
+  $("new").addEventListener("click", () => { autosave(true); $("workspace").hidden = true; $("start").hidden = false; $("loading").hidden = true; $("file").click(); });
+  $("page-no").addEventListener("change", () => root.PdfView.goTo(parseInt($("page-no").value, 10) || 1));
+  showResume();
 
-  root.TypstStudio = { attachCompiler, load, compile, project: () => project, editorDoc: (p) => docs[p], markers: () => markers, lineAt, cursorLine: () => cm && cm.getCursor().line };
+  root.TypstApp = { attachCompiler, load, batch, compile, project: () => project, editorDoc: (p) => docs[p], markers: () => markers, lineAt, cursorLine: () => cm && cm.getCursor().line };
 })(typeof globalThis !== "undefined" ? globalThis : this);

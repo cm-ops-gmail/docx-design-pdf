@@ -1,10 +1,10 @@
-/* Shared layout for the two code studios (typst.html, html.html). Colours come from app.css. */
-body.studio { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-body.studio .topbar { position: static; }
-.studio-start { flex: 1; overflow: auto; }
-.studio-start .wrap { max-width: 760px; margin: 0 auto; padding: 40px 20px 60px; display: grid; gap: 18px; }
-.studio-start h2 { font-size: 24px; }
-.studio-start .lede { color: var(--muted); margin: 6px 0 0; }
+/* Shared layout for the Typst and HTML pages (typst.html, html.html). Colours come from app.css. */
+body.workspace { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+body.workspace .topbar { position: static; }
+.start-screen { flex: 1; overflow: auto; }
+.start-screen .wrap { max-width: 760px; margin: 0 auto; padding: 40px 20px 60px; display: grid; gap: 18px; }
+.start-screen h2 { font-size: 24px; }
+.start-screen .lede { color: var(--muted); margin: 6px 0 0; }
 .opt-row { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
 .meta-fields { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
 .meta-note { margin: 0; font-size: 12.5px; color: var(--muted); }
@@ -12,6 +12,19 @@ body.studio .topbar { position: static; }
 .loading { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 14px; }
 .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid var(--line-strong); border-top-color: var(--brand-2); animation: spin2 0.8s linear infinite; flex: none; }
 @keyframes spin2 { to { transform: rotate(360deg); } }
+.resume { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.resume-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.resume-btns { display: flex; gap: 8px; }
+.batch { margin: 0; padding: 12px 16px 12px 34px; display: grid; gap: 6px; font-size: 13.5px; }
+.batch li { color: var(--muted); }
+.batch li.busy { color: var(--text); font-weight: 600; }
+.batch li.ok::marker { color: #2e9d5b; }
+.batch li.err { color: var(--danger); }
+.project-name { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.page-nav { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.page-nav input { width: 52px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); color: var(--text); font: 12.5px var(--font); padding: 4px 6px; text-align: right; }
+.CodeMirror-dialog { background: var(--surface-2); color: var(--text); font-size: 13px; }
+.CodeMirror-dialog input { color: var(--text); }
 .tree-card ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font: 13px/1.7 ui-monospace, Menlo, monospace; }
 
 .workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: 220px minmax(0, 1fr) minmax(0, 1fr); }
@@ -67,7 +80,7 @@ body.studio .topbar { position: static; }
 .btn-sm { padding: 6px 10px; font-size: 13px; border-radius: 8px; }
 .tool-links { display: flex; gap: 4px; padding: 4px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 11px; }
 
-/* PDF pages drawn by pdf.js (Typst Studio) */
+/* PDF pages drawn by pdf.js (Typst) */
 .viewer { position: absolute; inset: 0; overflow: auto; background: #8a8f98; padding: 16px 0; display: flex; flex-direction: column; align-items: center; gap: 14px; }
 @media (prefers-color-scheme: dark) { .viewer { background: #0b0f14; } }
 .pdfpage { position: relative; flex: none; background: #fff; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3); cursor: pointer; }
