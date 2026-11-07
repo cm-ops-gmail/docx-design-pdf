@@ -259,11 +259,15 @@
     document.querySelectorAll(".files button.file").forEach((b) => b.classList.toggle("on", b.dataset.path === path));
   }
 
+  // project list: Code, then one folder per top-level folder (media/, media_color/ …), each opened and
+  // closed like in VS Code. A folder's thumbnails are made only when it is first opened.
+  let thumbs = [];
   function buildFiles() {
     const box = $("files");
     box.textContent = "";
-    const grp = (t) => { const d = document.createElement("div"); d.className = "grp"; d.textContent = t; box.appendChild(d); };
-    grp("Code");
+    thumbs.forEach((u) => URL.revokeObjectURL(u));
+    thumbs = [];
+    const code = WorkspaceUI.folder(box, "Code", TEXT_FILES.length, true);
     for (const p of TEXT_FILES) {
       const b = document.createElement("button");
       b.className = "file";
@@ -271,27 +275,29 @@
       b.dataset.path = p;
       b.textContent = p;
       b.addEventListener("click", () => open(p));
-      box.appendChild(b);
+      code.appendChild(b);
     }
     const folders = {};
     for (const p of Object.keys(project.binaries)) { const f = p.split("/")[0]; (folders[f] = folders[f] || []).push(p); }
     for (const [f, list] of Object.entries(folders)) {
-      grp(`${f}/ · ${list.length}`);
-      for (const p of list.slice(0, 60)) {
-        const d = document.createElement("div");
-        d.className = "asset";
-        if (/\.(png|jpe?g|gif|svg)$/i.test(p)) {
-          const im = document.createElement("img");
-          im.src = URL.createObjectURL(new Blob([project.binaries[p]], { type: /svg$/.test(p) ? "image/svg+xml" : "image/" + p.split(".").pop().replace("jpg", "jpeg") }));
-          d.appendChild(im);
+      WorkspaceUI.folder(box, f + "/", list.length, false, (body) => {
+        for (const p of list) {
+          const d = document.createElement("div");
+          d.className = "asset";
+          if (/\.(png|jpe?g|gif|svg)$/i.test(p)) {
+            const im = document.createElement("img");
+            im.loading = "lazy";
+            im.src = URL.createObjectURL(new Blob([project.binaries[p]], { type: /svg$/.test(p) ? "image/svg+xml" : "image/" + p.split(".").pop().replace("jpg", "jpeg") }));
+            thumbs.push(im.src);
+            d.appendChild(im);
+          }
+          const s = document.createElement("span");
+          s.textContent = p.split("/").pop();
+          s.title = p;
+          d.appendChild(s);
+          body.appendChild(d);
         }
-        const s = document.createElement("span");
-        s.textContent = p.split("/").pop();
-        s.title = p;
-        d.appendChild(s);
-        box.appendChild(d);
-      }
-      if (list.length > 60) { const d = document.createElement("div"); d.className = "asset"; d.textContent = `… ${list.length - 60} more`; box.appendChild(d); }
+      });
     }
   }
 
@@ -370,6 +376,9 @@
       // Ctrl/Cmd+F find, Shift+Ctrl/Cmd+F (Cmd+Alt+F on a Mac) replace, Alt+G go to line: CodeMirror's search addon
       cm.setOption("extraKeys", { "Cmd-S": () => compile(false), "Ctrl-S": () => compile(false), "Alt-G": "jumpToLine" });
       cm.on("cursorActivity", syncPreview);
+      WorkspaceUI.init($("workspace"), () => cm.refresh());
+      $("fold-open").addEventListener("click", () => WorkspaceUI.setAll($("files"), true));
+      $("fold-close").addEventListener("click", () => WorkspaceUI.setAll($("files"), false));
       root.PdfView.init($("viewer"), (c) => {
         const l = lineAt(c);
         if (l != null) jumpToLine(l);

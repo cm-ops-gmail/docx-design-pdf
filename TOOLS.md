@@ -14,6 +14,13 @@ Two pages next to the styler (`index.html`, unchanged). Open them in Chrome or E
    This works through invisible position markers that are added only while compiling. Your files and downloads never contain them, and tests showed they move no word on any page.
 4. **Download project (.zip)** gives the folder. **Download PDF** gives the current PDF.
 
+Layout (both pages, like VS Code):
+
+- **Drag the bars** between the project list, the editor and the preview to make any of them wider. Double-click a bar to go back to the default widths.
+- **‹ next to PROJECT** folds the project list to a slim rail; **›** opens it again.
+- **Folders** (Code, media/, media_color/ …) open and close with a click on their name; **Expand** / **Collapse** do all of them. Every file is listed, and a folder's thumbnails are made only when it is first opened.
+- Widths, the folded list and open folders are remembered in this browser.
+
 More in the Typst page:
 
 - **Several chapters at once.** Choose or drop more than one .docx. You get one zip with a PDF for each chapter at the top and a full Typst project folder for each. Lines the compiler rejects are repaired the same way as in the editor, and the list shows how each chapter went.

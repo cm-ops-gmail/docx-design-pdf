@@ -57,11 +57,12 @@
     document.querySelectorAll(".files button.file").forEach((b) => b.classList.toggle("on", b.dataset.path === path));
   }
 
+  // project list: Code, then one folder per top-level folder (images/, templates/ …), opened and closed
+  // like in VS Code
   function buildFiles() {
     const box = $("files");
     box.textContent = "";
-    const grp = (t) => { const d = document.createElement("div"); d.className = "grp"; d.textContent = t; box.appendChild(d); };
-    grp("Code");
+    const code = WorkspaceUI.folder(box, "Code", TEXT_FILES.length + 1, true);
     for (const p of TEXT_FILES) {
       const b = document.createElement("button");
       b.className = "file";
@@ -69,27 +70,29 @@
       b.dataset.path = p;
       b.textContent = p;
       b.addEventListener("click", () => open(p));
-      box.appendChild(b);
+      code.appendChild(b);
     }
     const d0 = document.createElement("div");
     d0.className = "asset";
     d0.innerHTML = "<span>fonts.css (Kalpurush, embedded)</span>";
-    box.appendChild(d0);
+    code.appendChild(d0);
     const folders = {};
     for (const p of Object.keys(project.binaries)) { const f = p.split("/")[0]; (folders[f] = folders[f] || []).push(p); }
     for (const [f, list] of Object.entries(folders)) {
-      grp(`${f}/ · ${list.length}`);
-      for (const p of list.slice(0, 60)) {
-        const d = document.createElement("div");
-        d.className = "asset";
-        const im = document.createElement("img");
-        im.src = urls[p];
-        const s = document.createElement("span");
-        s.textContent = p.split("/").pop();
-        d.append(im, s);
-        box.appendChild(d);
-      }
-      if (list.length > 60) { const d = document.createElement("div"); d.className = "asset"; d.textContent = `… ${list.length - 60} more`; box.appendChild(d); }
+      WorkspaceUI.folder(box, f + "/", list.length, false, (body) => {
+        for (const p of list) {
+          const d = document.createElement("div");
+          d.className = "asset";
+          const im = document.createElement("img");
+          im.loading = "lazy";
+          im.src = urls[p];
+          const s = document.createElement("span");
+          s.textContent = p.split("/").pop();
+          s.title = p;
+          d.append(im, s);
+          body.appendChild(d);
+        }
+      });
     }
   }
 
@@ -113,6 +116,9 @@
       if (!cm) {
         cm = CodeMirror($("editor"), { lineNumbers: true, lineWrapping: true, tabSize: 2, indentUnit: 2 });
         cm.on("change", () => { clearTimeout(timer); timer = setTimeout(preview, 1200); });
+        WorkspaceUI.init($("workspace"), () => cm.refresh());
+        $("fold-open").addEventListener("click", () => WorkspaceUI.setAll($("files"), true));
+        $("fold-close").addEventListener("click", () => WorkspaceUI.setAll($("files"), false));
         cm.setOption("extraKeys", { "Cmd-S": preview, "Ctrl-S": preview });
       }
       for (const p of TEXT_FILES) docs[p] = CodeMirror.Doc(project.files[p], MODES[p]);

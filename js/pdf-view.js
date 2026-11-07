@@ -25,7 +25,8 @@
     onClick = clickHandler;
     onPage = pageHandler || null;
     load();
-    new ResizeObserver(() => { if (fit && doc) relayout(); }).observe(host);
+    let rt = null;
+    new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { if (fit && doc) relayout(); }, 120); }).observe(host);
     host.addEventListener("scroll", reportPage, { passive: true });
   }
 

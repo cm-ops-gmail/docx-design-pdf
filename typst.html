@@ -71,9 +71,9 @@
   <!-- workspace -->
   <section id="workspace" class="workspace" hidden>
     <aside class="pane">
-      <div class="pane-head"><h3>Project</h3><span id="project-name" class="project-name"></span></div>
+      <div class="pane-head"><h3>Project</h3><span class="files-tools"><button id="fold-open" type="button" title="Open every folder">Expand</button><button id="fold-close" type="button" title="Close every folder">Collapse</button></span><span id="project-name" class="project-name"></span></div>
       <div id="files" class="files"></div>
-      <div class="pane-head" style="border-top:1px solid var(--line);border-bottom:0">
+      <div class="pane-head pane-foot" style="border-top:1px solid var(--line);border-bottom:0">
         <button id="new" class="btn btn-quiet btn-sm" type="button">Open another .docx</button>
       </div>
     </aside>
@@ -115,6 +115,7 @@
   <script src="js/classify.js"></script>
   <script src="js/typst-gen.js"></script>
   <script src="js/pdf-view.js"></script>
+  <script src="js/workspace-ui.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
   <script src="js/scrapper/parser.js"></script>
   <script src="js/scrapper/sq.js"></script>
