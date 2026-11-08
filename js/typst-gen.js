@@ -531,7 +531,11 @@
       // Word's line box is taller than Typst's: a little room above and below the text, as in Word
       // many columns in little room: Word fits such a table to its content
       const dense = !t.nested && ncols >= 6 && (full ? room : wanted) / ncols < 30;
-      const insetOf = (c) => `(left: ${pt(dense ? 2 : mar(c, "left"))}, right: ${pt(dense ? 2 : mar(c, "right"))}, top: ${pt(mar(c, "top") + 3.5)}, bottom: ${pt(mar(c, "bottom") + 3.5)})`;
+      // the row is as tall as Word's line of the table's text
+      const firstP = t.rows[0] && t.rows[0].cells[0] && t.rows[0].cells[0].blocks.find((x) => x.kind === "p");
+      const lineF = firstP && firstP.para.lineRule === "auto" ? firstP.para.line / 240 : 1;
+      const padY = Math.max(2, (10 * WORD_LINE * lineF - 10 * CAP) / 2);
+      const insetOf = (c) => `(left: ${pt(mar(c, "left"))}, right: ${pt(mar(c, "right"))}, top: ${pt(mar(c, "top") + padY)}, bottom: ${pt(mar(c, "bottom") + padY)})`;
       const parts = [];
       for (const { c, rs, st } of cells) {
         const args = [];
@@ -540,13 +544,16 @@
         if (c.fill) args.push(`fill: rgb("#${c.fill}")`);
         if (c.valign === "center") args.push("align: left + horizon");
         else if (c.valign === "bottom") args.push("align: left + bottom");
-        if (c.mar) args.push(`inset: ${insetOf(c)}`);
+        if (c.mar && !dense) args.push(`inset: ${insetOf(c)}`);
         if (uniform === null) args.push(`stroke: (top: ${st.top}, bottom: ${st.bottom}, left: ${st.left}, right: ${st.right})`);
         const body = await blocksInline(c.blocks, { inCell: true, plain: dense });
         parts.push(args.length ? `table.cell(${args.join(", ")})[${body}]` : `[${body}]`);
       }
       const defCell = t.rows[0] && t.rows[0].cells[0] ? { mar: null } : { mar: null };
-      if (dense) return `#fit-width(table(columns: (${new Array(ncols).fill("auto").join(", ")}), stroke: ${uniform === null ? "none" : uniform}, inset: ${insetOf(defCell)}, align: center + horizon, ${parts.join(", ")}))`;
+      if (dense) {
+        const fit = `fit-width(${ncols}, ${full ? "auto" : pt(wanted)}, ins => table(columns: (${new Array(ncols).fill("auto").join(", ")}), stroke: ${uniform === null ? "none" : uniform}, inset: (x: ins, top: ${pt(padY)}, bottom: ${pt(padY)}), align: center + horizon, ${parts.join(", ")}))`;
+        return t.jc === "center" && !full ? `#align(center, ${fit})` : t.jc === "right" && !full ? `#align(right, ${fit})` : `#${fit}`;
+      }
       let out = `table(columns: (${cols.join(", ")}${cols.length === 1 ? "," : ""}), stroke: ${uniform === null ? "none" : uniform}, inset: ${insetOf(defCell)}, align: left + top, ${parts.join(", ")})`;
       if (Math.abs(t.ind) > 1 && !full) out = `pad(left: ${pt(t.ind)}, ${out})`;
       if (t.jc === "center" && !full) return `#align(center, ${out})`;
@@ -1096,12 +1103,14 @@
   } else { draw(lead) }
 }
 
-// a table sized by its content, shrunk when wider than the column
-#let fit-width(body) = layout(size => {
-  let w = measure(body).width
-  if w <= size.width { body } else {
+// a table of many narrow columns, sized by its content as in Word: extra room is shared out over the columns up to
+// Word's width (auto: the whole column); a table wider than the column shrinks to fit
+#let fit-width(n, target, make) = layout(size => {
+  let room = if target == auto { size.width } else { calc.min(target, size.width) }
+  let w = measure(make(2pt)).width
+  if w <= room { make(2pt + (room - w) / (2 * n)) } else {
     let r = size.width / w * 100%
-    scale(x: r, y: r, origin: top + left, reflow: true, box(width: w, body))
+    scale(x: r, y: r, origin: top + left, reflow: true, box(width: w, make(2pt)))
   }
 })
 
