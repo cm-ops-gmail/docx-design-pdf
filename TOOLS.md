@@ -21,6 +21,17 @@ Layout (both pages, like VS Code):
 - **Folders** (Code, media/, media_color/ …) open and close with a click on their name; **Expand** / **Collapse** do all of them. Every file is listed, and a folder's thumbnails are made only when it is first opened.
 - Widths, the folded list and open folders are remembered in this browser.
 
+What the Typst page takes from the Word file:
+
+- **Columns.** Each Word section keeps its own columns and gap, filled evenly like Word. MCQ parts always have two columns, and so do long CQ parts of a one-column section.
+- **Paragraphs.** Space before and after, line spacing, alignment, left / right / hanging / first-line indents, keep-with-next. Shaded paragraphs next to each other make one band.
+- **Tabs.** Word's own tab stops (left, centre, right), then its default stops.
+- **Tables.** Column widths, position, borders per cell, cell margins, vertical alignment, fills. Tables with many narrow columns fit their content.
+- **Text.** Sizes and colours as set in Word.
+- **Figures.** Floating figures at their Word position; pictures follow their paragraph's alignment.
+
+The MCQ styling stays the tool's own (`tags/mcq.typ`): circled options, answer circle, board references, 9pt, its spacing. CQ keeps its two columns and its (ক)–(ঘ) indent (`tags/cq.typ`), with Word's paragraph settings for the rest. The page size, header and footer come from `page_setup_template.typ`.
+
 More in the Typst page:
 
 - **Several chapters at once.** Choose or drop more than one .docx. You get one zip with a PDF for each chapter at the top and a full Typst project folder for each. Lines the compiler rejects are repaired the same way as in the editor, and the list shows how each chapter went.

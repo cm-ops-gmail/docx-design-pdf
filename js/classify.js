@@ -285,6 +285,43 @@
     return opts;
   }
 
+  // One Word paragraph can hold a question, its options and its answer, separated by line breaks. This returns
+  // the blocks with such a paragraph cut into its parts: the question, each line of options, the answer line, and
+  // everything after the answer (an explanation) still together with its line breaks. The pieces have no XML node:
+  // their equations were linked to their items before.
+  function splitMcqLines(blocks) {
+    const out = [];
+    const isOpt = (t) => /^\s*\(\s*[কখগঘঙ]\s*\)/.test(t);
+    const isAns = (t) => ANS_LETTER.test(t.trim());
+    for (const b of blocks) {
+      if (b.kind !== "p" || !b.items.some((i) => i.t === "br") || !/\(\s*[কখগঘঙ]\s*\)|উত্তর/.test(b.text)) { out.push(b); continue; }
+      const lines = [[]];
+      for (const it of b.items) { if (it.t === "br") lines.push([]); else lines[lines.length - 1].push(it); }
+      const text = (items) => items.map((i) => (i.t === "text" ? i.text : OBJ)).join("");
+      const flat = lines.map(text);
+      // nothing to separate: an ordinary paragraph that only mentions an option
+      if (!flat.some((t) => isOpt(t) || isAns(t))) { out.push(b); continue; }
+      let cur = [];
+      const flush = () => {
+        if (!cur.length) return;
+        const items = [];
+        cur.forEach((l, n) => { if (n) items.push({ t: "br" }); items.push(...l); });
+        const t = items.map((i) => (i.t === "text" ? i.text : i.t === "br" ? "\n" : OBJ)).join("");
+        if (t.trim() || items.some((i) => i.t !== "text" && i.t !== "br")) out.push(Object.assign({}, b, { items, text: t, node: null }));
+        cur = [];
+      };
+      let answered = false;
+      lines.forEach((l, n) => {
+        if (answered) { cur.push(l); return; }
+        if (isAns(flat[n])) { flush(); cur.push(l); flush(); answered = true; return; }
+        if (isOpt(flat[n])) { flush(); cur.push(l); flush(); return; }
+        cur.push(l);
+      });
+      flush();
+    }
+    return out;
+  }
+
   function mcqUnits(blocks) {
     const units = [];
     let cur = null;
@@ -353,5 +390,5 @@
     });
   }
 
-  root.Classify = { segment, mcqUnits, cqRoles, tableOptions, isStim, OPT_MARK_G, BOARD_TAIL, Q_START, splitSource, sliceItems, trimItems, itemsText, isBanner, clean };
+  root.Classify = { segment, mcqUnits, splitMcqLines, cqRoles, tableOptions, isStim, OPT_MARK_G, BOARD_TAIL, Q_START, splitSource, sliceItems, trimItems, itemsText, isBanner, clean };
 })(typeof globalThis !== "undefined" ? globalThis : this);

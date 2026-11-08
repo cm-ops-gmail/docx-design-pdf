@@ -18,6 +18,10 @@
   const EMU_PT = 12700;
   // text width of the Typst page (8.5in - 2 x 0.58in) and of one column of #columns(2) (4% gutter), points
   const COL1 = 528.48, COL2 = (COL1 * 0.96) / 2;
+  // Kalpurush: a single line in Word is 1.575em (ascent + descent + line gap); Typst measures a line from cap
+  // height (0.615em) to the baseline, the rest is leading
+  const WORD_LINE = 1.575, CAP = 0.615;
+  const WORD_LEADING = WORD_LINE - CAP;
 
   // ---------- markup escaping ----------
   // every character with a meaning in Typst markup gets a backslash
@@ -97,6 +101,8 @@
     const meta = Object.assign(guessMeta(opts.name), Object.fromEntries(Object.entries(opts.meta || {}).filter(([, v]) => v)));
     const media = createMedia(model, mediaPrefix(meta));
     let zone = "normal";     // "normal" | "mcq" | "cq": the part being written
+    let unsplit = 0;         // the open columns: sum of h^2 of the pictures in them
+    // (curN / curGap: the columns being written, declared with the column code below)
     const lines = [];        // main.typ body lines
     const fallback = [];     // same index: plain text that can replace the line, or null
     const warnings = [];
@@ -113,6 +119,7 @@
     async function picture(it, block) {
       const im = await media.get(it.target, it.crop);
       const w = it.cx ? it.cx / EMU_PT : 0;
+      unsplit += ((it.cy || 0) / EMU_PT) ** 2;
       if (!im) { warnings.push("A picture in EMF/WMF format was left out (Typst cannot draw it)."); return `#box(stroke: 0.5pt + gray, inset: 3pt)[#text(size: 7pt, fill: gray)[picture]]`; }
       if (block) return `#pic(${media.src(im)}, ${w ? pt(w) : "100%"})`;
       return `#box(image(${media.src(im)}${w ? ", width: " + pt(w) : ""}))`;
@@ -191,9 +198,11 @@
           if (it.va === "sub") wrap("#sub");
           else if (it.va === "sup") wrap("#super");
           if (o.keepSize && it.sz) wrap(`#text(size: ${pt(it.sz / 2)})`);
+          else if (zone !== "mcq") { if (it.sz && it.sz !== 20) wrap(`#text(size: ${pt(it.sz / 2)})`); }
           else if (it.sz && it.sz <= 16 && !o.noSmall) wrap("#text(size: 0.8em)");
-          if (it.color && !/^0{6}$/i.test(it.color) && !/^auto$/i.test(it.color)) wrap(`#text(fill: rgb("#${it.color}"))`);
+          // bold inside the colour: the bold rule outlines letters in the colour around it
           if (it.b) wrap("#strong");
+          if (it.color && !/^0{6}$/i.test(it.color) && !/^auto$/i.test(it.color)) wrap(`#text(fill: rgb("#${it.color}"))`);
           if (it.i) wrap("#emph");
           if (it.u) wrap("#underline");
           if (it.s) wrap("#strike");
@@ -220,12 +229,68 @@
     // the paragraph holds one inline equation and nothing else
     const loneMath = (items) => { const real = items.filter((i) => !(i.t === "text" && !i.text.trim()) && i.t !== "shape" && !(i.t === "img" && i.floating)); return real.length === 1 && real[0].t === "math" && !real[0].display; };
 
+    // lines of a paragraph that has tabs, each drawn by #tabbed at Word's tab stops; null when it has none
+    // (MCQ parts keep their own option layout)
+    async function tabLines(items, b, o) {
+      if (zone === "mcq" || !items.some((i) => i.t === "tab")) return null;
+      const pa = (b && b.para) || {}, ind = pa.ind || {};
+      const L = ind.left || 0, H = ind.hanging || 0;
+      const stops = (pa.tabs || []).map((t) => [t.pos, t.val === "right" ? "r" : t.val === "center" ? "c" : "l"]);
+      if (H > 0) stops.push([L, "l"]); // a hanging indent is a tab stop too
+      stops.sort((x, y) => x[0] - y[0]);
+      const code = `(${stops.map(([v, k]) => `(${pt(v)}, "${k}")`).join(", ")}${stops.length === 1 ? "," : ""})`;
+      const lines = [[[]]];
+      for (const it of items) {
+        if (it.t === "br") lines.push([[]]);
+        else if (it.t === "tab") lines[lines.length - 1].push([]);
+        else lines[lines.length - 1][lines[lines.length - 1].length - 1].push(it);
+      }
+      const out = [];
+      for (let n = 0; n < lines.length; n++) {
+        const segs = [];
+        for (const seg of lines[n]) segs.push(`[${await inline(seg, b, o)}]`);
+        // where the line starts: the first one at the first-line indent, later ones at the left indent
+        const x0 = n === 0 ? L - H : L;
+        out.push(segs.length > 1 ? `#tabbed(${code}, ${pt(model.defaultTab || 36)}, ${pt(x0)}, (${segs.join(", ")}))` : segs[0].slice(1, -1));
+      }
+      return out;
+    }
+
+    // a finished paragraph in its Word settings: space before / after, line height, justification, indents
+    function wordPara(s, b, o) {
+      o = o || {};
+      if (zone === "mcq") return s;
+      const pa = b.para || {};
+      const args = [];
+      if (pa.before) args.push(`a: ${pt(pa.before)}`);
+      if (pa.after) args.push(`b: ${pt(pa.after)}`);
+      if (pa.lineRule === "exact") args.push(`l: ${pt(pa.line / 20 - 10 * CAP)}`);
+      else if (pa.lineRule !== "atLeast" && Math.abs(pa.line / 240 - 1) > 0.012) args.push(`l: ${((WORD_LINE * pa.line) / 240 - CAP).toFixed(3)}em`);
+      if (pa.jc !== "both" && pa.jc !== "distribute" && !o.lone) args.push("j: false");
+      if (!o.noIndent && !o.listed) {
+        const ind = pa.ind || {};
+        const left = (ind.left || 0) - Math.max(0, ind.hanging || 0);
+        if (Math.abs(left) > 0.5) args.push(`left: ${pt(left)}`);
+        if (ind.right > 0.5) args.push(`right: ${pt(ind.right)}`);
+        if (ind.hanging > 0.5) args.push(`hang: ${pt(ind.hanging)}`);
+        else if (ind.hanging < -0.5) args.push(`first: ${pt(-ind.hanging)}`);
+      }
+      if (pa.keepNext) args.push("s: true");
+      if (o.mathLine) args.push("m: true");
+      return args.length ? `#wp(${args.join(", ")})[${s}]` : s;
+    }
+
+    const alignOf = (jc, s) => (jc === "center" ? `#align(center)[${s}]` : jc === "right" || jc === "end" ? `#align(right)[${s}]` : s);
+
     // a paragraph cut into words (each keeps its formatting), for wrapping text around a picture
     async function wordsOf(items, b) {
       const words = [];
       let cur = [];
       const flush = () => { if (cur.length) { words.push(cur.join("")); cur = []; } };
       const lone = loneMath(items);
+      // a line with tabs stays whole, so its tab stops survive
+      const tl = await tabLines(items.filter((i) => i.t !== "shape" && !(i.t === "img" && i.floating)), b);
+      if (tl) { tl.forEach((l, n) => { if (n) words.push("#linebreak()"); words.push(l); }); return words.filter(Boolean); }
       for (const it of items) {
         if (it.t === "text") {
           for (const part of it.text.split(/(\s+)/)) {
@@ -238,22 +303,25 @@
         else if (it.t !== "shape") cur.push(await inline([it], b, { lone }));
       }
       flush();
+      if (lone && zone !== "mcq") return words.filter(Boolean).map((w) => wordPara(w, Object.assign({}, b, { para: Object.assign({}, b.para, { jc: "both", before: 0, after: 0, keepNext: false }) }), { lone: true, mathLine: true, noIndent: true }));
       return words.filter(Boolean);
     }
 
     // ---------- text flowing beside a floating picture or drawing (Word's square wrapping) ----------
-    const wrapFloat = (b) => (b && b.kind === "p" && plainOf(b) && rowOf(floatsOf(b)).length < 2 ? b.items.find((i) => (i.t === "img" || i.t === "shape") && i.floating && i.wrap && !i.consumed) : null);
+    const wrapFloat = (b) => (b && b.kind === "p" && (plainOf(b) || zone !== "mcq") && rowOf(floatsOf(b)).length < 2 ? b.items.find((i) => (i.t === "img" || i.t === "shape") && i.floating && i.wrap && !i.consumed) : null);
+    const isEmpty = (x) => x && x.kind === "p" && !plainOf(x) && !x.items.some((i) => i.t !== "text" && i.t !== "br" && i.t !== "tab");
     // the paragraphs after blocks[k] that Word keeps beside its floating picture f: as many lines as the
     // picture is tall (10pt Kalpurush: ~12pt lines, ~4.8pt a character), one or two more to be safe. Any that
     // do not fit beside it in Typst simply continue full width underneath.
     function followersFor(blocks, k, f, colW) {
       const pw = f.cx / EMU_PT, ph = f.cy / EMU_PT + (f.dy || 0) + (f.caption ? f.caption.cy / EMU_PT : 0);
       const perLine = Math.max(8, (colW - pw - 9) / 4.8);
+      // a Word line of 10pt Kalpurush is about 15.5pt
       const lines = (x) => (loneMath(x.items) ? (/frac|sqrt|\//.test((x.items.find((i) => i.t === "math") || {}).tex || "") ? 2.5 : 1.4) : Math.max(1, Math.ceil(plainOf(x).length / perLine)));
-      const ok = (x) => x && x.kind === "p" && (plainOf(x) || loneMath(x.items)) && !x.para.heading && !x.para.shd && !x.para.border && !wrapFloat(x) &&
+      const ok = (x) => x && x.kind === "p" && (plainOf(x) || loneMath(x.items) || isEmpty(x)) && !x.para.heading && !x.para.shd && !x.para.border && !wrapFloat(x) &&
         !x.items.some((i) => i.t === "img" || i.t === "shape" || (i.t === "math" && i.display));
-      let used = lines(blocks[k]);
-      const room = ph / 12.1 + 1.5;
+      let used = plainOf(blocks[k]) ? lines(blocks[k]) : 0;
+      const room = ph / 15.5 + 1;
       const out = [];
       while (used < room && ok(blocks[k + 1 + out.length])) { const nb = blocks[k + 1 + out.length]; out.push(nb); used += lines(nb); }
       return out;
@@ -268,7 +336,7 @@
       return cap ? `stack(spacing: 2pt, ${base}, ${cap})` : base;
     }
 
-    const floatsOf = (b) => b.items.filter((i) => !i.consumed && ((i.t === "img" && i.floating) || (i.t === "shape" && i.floating && i.wrap)));
+    const floatsOf = (b) => b.items.filter((i) => !i.consumed && ((i.t === "img" && i.floating) || (i.t === "shape" && i.floating && (i.wrap || zone !== "mcq"))));
 
     // floats of one paragraph that sit side by side at about the same height (Word positions known)
     function rowOf(floats) {
@@ -309,10 +377,17 @@
         out.push([`#float-row(${pt(colW)}, (${figs.join(", ")}))`, null]);
         return out;
       }
-      const floats = !o.inCell && plainOf(b) ? floatsOf(b) : [];
+      const floats = !o.inCell && (plainOf(b) || zone !== "mcq") ? floatsOf(b) : [];
       if (floats.length) {
         const out = [];
-        for (const f of floats.filter((f) => !f.wrap)) out.push([`#align(center, ${(await picture(f, true)).slice(1)})`, null]);
+        for (const f of floats.filter((f) => !f.wrap)) {
+          if (zone === "mcq") { out.push([`#align(center, ${(await picture(f, true)).slice(1)})`, null]); continue; }
+          const fig = await floatFig(f);
+          if (!fig) continue;
+          // top-and-bottom wrapping takes its own place in the flow; no wrapping lies over the text, as in Word
+          if (f.wrapType === "topandbottom") out.push([`#float-row(${pt(f.colW || COL1)}, ((${pt(f.x || 0)}, 0pt, ${fig}),))`, null]);
+          else out.push([`#overlay(${pt(f.x || 0)}, ${pt(f.dy || 0)}, ${fig})`, null]);
+        }
         const wrapped = floats.filter((f) => f.wrap);
         let rest = Object.assign({}, b, { items: b.items.filter((i) => !floats.includes(i)) });
         if (!wrapped.length) return out.concat(await paragraph(rest, o));
@@ -321,13 +396,18 @@
         // a drawing that starts a line or more below the top of its paragraph: that paragraph stays full
         // width above it and only the paragraphs after it go beside it
         let dy = f.t === "shape" ? f.dy || 0 : 0;
+        if (zone !== "mcq" && !followers.length && !plainOf(rest)) { // a figure with nothing to flow beside it
+          out.push([`#float-row(${pt(f.colW || COL1)}, ((${pt(f.x || 0)}, 0pt, ${await floatFig(f)}),))`, null]);
+          for (const g of wrapped.slice(1)) out.push([`#float-row(${pt(g.colW || COL1)}, ((${pt(g.x || 0)}, 0pt, ${await floatFig(g)}),))`, null]);
+          return out;
+        }
         if (dy >= 10 && followers.length) { out.push(...(await paragraph(rest, Object.assign({}, o, { followers: null })))); rest = null; dy = Math.max(0, dy - 16); }
         let words = rest ? await wordsOf(rest.items, b) : [];
         // Word keeps flowing the next paragraphs beside a picture taller than its own paragraph
         for (const nb of followers) words = words.concat(words.length ? ["#parbreak()"] : [], await wordsOf(nb.items, nb));
         let fig = await floatFig(f);
         if (dy >= 1) fig = `pad(top: ${pt(dy)}, ${fig})`;
-        const min = f.t === "shape" ? ", min-text: 0.8in" : "";
+        const min = f.t === "shape" || zone !== "mcq" ? ", min-text: 0.8in" : "";
         out.push([`#wrap-pic(${fig}, side: ${f.wrap === "left" ? "left" : "right"}${min}, (${words.map((w) => `[${w}]`).join(", ")},))`,
           (rest ? [b] : []).concat(followers).map(plainOf).join(" ")]);
         for (const g of wrapped.slice(1)) out.push(g.t === "shape" ? [await drawing(g), null] : [`#align(center, ${(await picture(g, true)).slice(1)})`, null]);
@@ -337,22 +417,38 @@
       const real = b.items.filter((i) => !(i.t === "text" && !i.text.trim()));
       if (real.length === 1 && real[0].t === "math" && real[0].display) {
         const om = mathQueue(b)[0];
-        return [[`$ ${om ? root.OMMLTypst.typst(om, { display: true }) : q(real[0].tex)} $`, plainOf(b) || null]];
+        const eq = `$ ${om ? root.OMMLTypst.typst(om, { display: true }) : q(real[0].tex)} $`;
+        // a display equation is centred unless Word's equation options say otherwise
+        const mj = real[0].mjc;
+        if (o.plain) return [[`$${om ? root.OMMLTypst.typst(om) : q(real[0].tex)}$`, plainOf(b) || null]];
+        return [[wordPara(mj === "left" ? `#align(left)[${eq}]` : mj === "right" ? `#align(right)[${eq}]` : eq, b, Object.assign({}, o, { lone: true, mathLine: true })), plainOf(b) || null]];
       }
       const lone = loneMath(b.items);
-      const onlyPics = !plainOf(b) && b.items.some((i) => i.t === "img" || i.t === "shape");
+      const picsOnLine = b.items.filter((i) => (i.t === "img" || i.t === "shape") && !i.consumed);
+      // outside MCQ a single picture sits where its paragraph puts it; several on a line stay on that line
+      const onlyPics = !plainOf(b) && b.items.some((i) => i.t === "img" || i.t === "shape") && (zone === "mcq" || picsOnLine.length <= 1);
       if (onlyPics) {
         const out = [];
         for (const it of b.items) {
-          if (it.t === "img") out.push([`#align(center, ${(await picture(it, true)).slice(1)})`, null]);
-          else if (it.t === "shape" && !it.consumed) { const d = await drawing(it); if (d) out.push([d, null]); }
+          if (zone === "mcq") {
+            if (it.t === "img") out.push([`#align(center, ${(await picture(it, true)).slice(1)})`, null]);
+            else if (it.t === "shape" && !it.consumed) { const d = await drawing(it); if (d) out.push([d, null]); }
+            continue;
+          }
+          const al = b.para.jc === "center" ? "center" : b.para.jc === "right" || b.para.jc === "end" ? "right" : "left";
+          const pl = (x) => (o.plain ? x : wordPara(x, b, { lone: true, noIndent: o.noIndent }));
+          if (it.t === "img") out.push([pl(alignOf(b.para.jc, await picture(it, true))), null]);
+          else if (it.t === "shape" && !it.consumed) { const d = await drawing(it, { al }); if (d) out.push([pl(d), null]); }
         }
         return out;
       }
       const pa0 = b.para || {};
       // a numbered paragraph in ordinary text: Word's indent, the label in the hanging space
-      const listed = pa0.list && zone === "normal" && !o.inCell && b.items[0] && b.items[0].label;
-      let s = await inline(listed ? b.items.slice(1) : b.items, b, { shapes, keepSize: o.keepSize, lone });
+      const listed = pa0.list && zone !== "mcq" && !o.inCell && b.items[0] && b.items[0].label;
+      const para = listed ? b.items.slice(1) : b.items;
+      const inlineOpts = { shapes, keepSize: o.keepSize, lone };
+      const tl = await tabLines(para, b, inlineOpts);
+      let s = tl ? tl.join(" #linebreak() ") : await inline(para, b, inlineOpts);
       if (listed && s) {
         const L = pa0.list;
         const lab = await inline([Object.assign({}, b.items[0], { text: b.items[0].text.replace(/[\s\u00a0]+$/, "") })], b);
@@ -361,11 +457,19 @@
       if (!s) { const out = []; for (const sh of shapes) { const d = await drawing(sh); if (d) out.push([d, null]); } return out; }
       const pa = b.para || {};
       if (o.prefix) s = o.prefix(s);
-      if (!o.inCell && pa.heading) s = `#heading(level: ${Math.min(pa.heading, 3)})[${s}]`;
-      else if (pa.jc === "center") s = `#align(center)[${s}]`;
-      else if (pa.jc === "right" || pa.jc === "end") s = `#align(right)[${s}]`;
-      if (!o.inCell && pa.shd) s = `#block(fill: rgb("#${pa.shd}"), inset: 8pt, width: 100%)[${s}]`;
-      else if (!o.inCell && pa.border) s = `#block(stroke: 0.7pt, inset: 6pt, width: 100%)[${s}]`;
+      if (zone === "mcq") {
+        if (!o.inCell && pa.heading) s = `#heading(level: ${Math.min(pa.heading, 3)})[${s}]`;
+        else s = alignOf(pa.jc, s);
+        if (!o.inCell && pa.shd) s = `#block(fill: rgb("#${pa.shd}"), inset: 8pt, width: 100%)[${s}]`;
+        else if (!o.inCell && pa.border) s = `#block(stroke: 0.7pt, inset: 6pt, width: 100%)[${s}]`;
+      } else {
+        s = alignOf(pa.jc, s);
+        if (!o.plain) s = wordPara(s, b, { lone, mathLine: lone, listed, noIndent: o.noIndent });
+        // shaded paragraphs next to each other become one band: see shadeRun (a cell has no such run)
+        if (o.inCell && pa.shd) s = `#block(fill: rgb("#${pa.shd}"), width: 100%)[${s}]`;
+        if (!o.inShade && !o.inCell && pa.shd) s = `#shade("${pa.shd}")[${s}]`;
+        else if (!o.inCell && pa.border) s = `#block(stroke: 0.7pt, inset: 6pt, width: 100%)[${s}]`;
+      }
       const out = [[s, plainOf(b)]];
       for (const sh of shapes) { const d = await drawing(sh); if (d) out.push([d, null]); }
       return out;
@@ -385,33 +489,69 @@
       return `#block(stroke: 0.7pt, inset: 6pt, width: 100%)[${await blocksInline(blocks, { inCell: true })}]`;
     }
 
+    // a table as Word draws it: its own column widths, position, borders, cell margins and vertical alignment
+    const strokeOf = (e) => (e ? `${pt(e.w)} + ${/^0{6}$/.test(e.color) ? "black" : `rgb("#${e.color}")`}` : "none");
     async function table(t) {
-      if (t.rows.length === 1 && t.rows[0].cells.length === 1 && t.rows[0].cells[0].span === 1) {
-        const c = t.rows[0].cells[0];
-        const style = [`width: 100%`, `inset: 6pt`, t.bordered ? "stroke: 0.7pt" : null, c.fill ? `fill: rgb("#${c.fill}")` : null].filter(Boolean).join(", ");
-        return `#block(${style})[${await blocksInline(c.blocks, { inCell: true })}]`;
-      }
       const ncols = Math.max(t.cols.length, ...t.rows.map((r) => r.cells.reduce((s, c) => s + c.span, 0)), 1);
-      const total = t.cols.reduce((a, b) => a + b, 0);
-      const cols = t.cols.length === ncols && total > 0 ? t.cols.map((w) => Math.max(0.05, Math.round((100 * w) / total) / 100) + "fr") : new Array(ncols).fill("1fr");
-      const cells = [];
+      const total = (t.cols.reduce((a, b) => a + b, 0) || 0) / 20; // points
+      // room in the Typst column; a Word-section table in a forced two-column part is measured against that part
+      const room = curN > 1 ? (COL1 - (curN - 1) * curGap) / curN : COL1;
+      let wanted = total;
+      if (t.width && t.width.type === "pct") wanted = ((t.width.w / 5000) * (t.colW || room));
+      else if (t.width && t.width.type === "dxa" && t.width.w) wanted = t.width.w / 20;
+      const full = t.nested || !wanted || wanted >= room * 0.97;
+      const known = t.cols.length === ncols && total > 0;
+      const cols = known ? (full
+        ? t.cols.map((w) => Math.max(0.05, Math.round((100 * w) / (total * 20)) / 100) + "fr")
+        : t.cols.map((w) => pt(((w / 20) / total) * wanted))) : new Array(ncols).fill(full ? "1fr" : pt(wanted / ncols));
       const grid = t.rows.map((r) => { let col = 0; return r.cells.map((c) => { const o = { c, col }; col += c.span; return o; }); });
+      const B = t.tblBorders || {};
+      const cells = [];
+      const strokes = new Set();
       for (let ri = 0; ri < t.rows.length; ri++) {
         for (const { c, col } of grid[ri]) {
           if (c.vmerge === "continue") continue;
           let rs = 1;
           if (c.vmerge === "restart") for (let k = ri + 1; k < grid.length; k++) { const below = grid[k].find((x) => x.col === col); if (below && below.c.vmerge === "continue") rs++; else break; }
-          const args = [];
-          if (c.span > 1) args.push(`colspan: ${c.span}`);
-          if (rs > 1) args.push(`rowspan: ${rs}`);
-          if (c.fill) args.push(`fill: rgb("#${c.fill}")`);
-          else if (ri === 0 && t.bordered && t.rows.length > 1) args.push("fill: luma(242)");
-          if (ri === 0 && t.bordered && t.rows.length > 1) args.push("align: center + horizon");
-          const body = await blocksInline(c.blocks, { inCell: true });
-          cells.push(args.length ? `table.cell(${args.join(", ")})[${body}]` : `[${body}]`);
+          const own = c.borders || {};
+          const side = (name, outer, inner, atEdge) => (own[name] !== undefined ? own[name] : atEdge ? B[outer] : B[inner]);
+          const e = {
+            top: side("top", "top", "insideH", ri === 0),
+            bottom: side("bottom", "bottom", "insideH", ri + rs >= t.rows.length),
+            left: side("left", "left", "insideV", col === 0),
+            right: side("right", "right", "insideV", col + c.span >= ncols),
+          };
+          const st = { top: strokeOf(e.top), bottom: strokeOf(e.bottom), left: strokeOf(e.left), right: strokeOf(e.right) };
+          Object.values(st).forEach((x) => strokes.add(x));
+          cells.push({ c, rs, st });
         }
       }
-      return `#table(columns: (${cols.join(", ")}${cols.length === 1 ? "," : ""}), stroke: ${t.bordered ? "0.7pt + black" : "none"}, inset: 5pt, align: horizon + left, ${cells.join(", ")})`;
+      const uniform = strokes.size === 1 ? [...strokes][0] : null;
+      const mar = (c, k) => { const m = (c.mar && c.mar[k] != null ? c.mar[k] : (t.cellMar || {})[k]) || 0; return m; };
+      // Word's line box is taller than Typst's: a little room above and below the text, as in Word
+      // many columns in little room: Word fits such a table to its content
+      const dense = !t.nested && ncols >= 6 && (full ? room : wanted) / ncols < 30;
+      const insetOf = (c) => `(left: ${pt(dense ? 2 : mar(c, "left"))}, right: ${pt(dense ? 2 : mar(c, "right"))}, top: ${pt(mar(c, "top") + 3.5)}, bottom: ${pt(mar(c, "bottom") + 3.5)})`;
+      const parts = [];
+      for (const { c, rs, st } of cells) {
+        const args = [];
+        if (c.span > 1) args.push(`colspan: ${c.span}`);
+        if (rs > 1) args.push(`rowspan: ${rs}`);
+        if (c.fill) args.push(`fill: rgb("#${c.fill}")`);
+        if (c.valign === "center") args.push("align: left + horizon");
+        else if (c.valign === "bottom") args.push("align: left + bottom");
+        if (c.mar) args.push(`inset: ${insetOf(c)}`);
+        if (uniform === null) args.push(`stroke: (top: ${st.top}, bottom: ${st.bottom}, left: ${st.left}, right: ${st.right})`);
+        const body = await blocksInline(c.blocks, { inCell: true, plain: dense });
+        parts.push(args.length ? `table.cell(${args.join(", ")})[${body}]` : `[${body}]`);
+      }
+      const defCell = t.rows[0] && t.rows[0].cells[0] ? { mar: null } : { mar: null };
+      if (dense) return `#fit-width(table(columns: (${new Array(ncols).fill("auto").join(", ")}), stroke: ${uniform === null ? "none" : uniform}, inset: ${insetOf(defCell)}, align: center + horizon, ${parts.join(", ")}))`;
+      let out = `table(columns: (${cols.join(", ")}${cols.length === 1 ? "," : ""}), stroke: ${uniform === null ? "none" : uniform}, inset: ${insetOf(defCell)}, align: left + top, ${parts.join(", ")})`;
+      if (Math.abs(t.ind) > 1 && !full) out = `pad(left: ${pt(t.ind)}, ${out})`;
+      if (t.jc === "center" && !full) return `#align(center, ${out})`;
+      if ((t.jc === "right" || t.jc === "end") && !full) return `#align(right, ${out})`;
+      return `#${out}`;
     }
 
     async function block(b, o) {
@@ -471,7 +611,8 @@
     // raw: a plain box at the Word size (code mode, no #) for wrap-pic, instead of a centred #fitbox line
     async function drawing(item, o) {
       const W = item.cx / EMU_PT, H = item.cy / EMU_PT;
-      if (!(W > 0) || !(H > 0)) return "";
+      if (!(W > 0) && !(H > 0)) return ""; // (a straight line can have no height or no width)
+      unsplit += H * H;
       const out = [];
       const texts = []; // text boxes (rect shapes with text): placed at the end
       const place = (x, y, what) => out.push(`#place(top + left, dx: ${pt(x)}, dy: ${pt(y)}, ${what})`);
@@ -538,7 +679,7 @@
         const anchor = bodyPr && bodyPr.getAttribute("anchor");
         const v = anchor === "ctr" ? "horizon" : anchor === "b" ? "bottom" : "top";
         // lines measured down to the descender, so a box sized by its text holds all of it (same line pitch)
-        const content = body ? `[#set par(leading: 0.1em, justify: false); #set text(bottom-edge: "descender"); #align(${v})[${body}]]` : "[]";
+        const content = body ? `[#set par(leading: 0.56em, spacing: 0.56em, justify: false); #set text(bottom-edge: "descender"); #align(${v})[${body}]]` : "[]";
         const W2 = pt(bx.w), H2 = pt(bx.h);
         const poly = polygonFor(prst, bx.w, bx.h);
         if (poly) {
@@ -585,9 +726,9 @@
         // an invisible copy in the flow sets the height; the real one is placed last so it covers what is under it
         return `box(width: ${pt(W)})[#grid(columns: (0pt, auto), box(height: ${pt(H)}), hide(pad(left: ${pt(t.bx.x0)}, top: ${pt(t.bx.y0)}, ${t.grow}))) ${out.join(" ")} #place(top + left, dx: ${pt(t.bx.x0)}, dy: ${pt(t.bx.y0)}, ${t.grow})]`;
       }
+      if (o && o.raw) { for (const t of texts) place(t.bx.x0, t.bx.y0, t.r); return `box(width: ${pt(W)}, height: ${pt(H)})[${out.join(" ")}]`; }
       for (const t of texts) place(t.bx.x0, t.bx.y0, t.r);
-      if (o && o.raw) return `box(width: ${pt(W)}, height: ${pt(H)})[${out.join(" ")}]`;
-      return `#fitbox(${pt(W)}, ${pt(H)})[${out.join(" ")}]`;
+      return `#fitbox(${pt(W)}, ${pt(H)}${o && o.al ? `, al: ${o.al}` : ""})[${out.join(" ")}]`;
     }
     function polygonFor(prst, w, h) {
       const P = (pts) => pts.map(([x, y]) => `(${pt(x)}, ${pt(y)})`).join(", ");
@@ -610,7 +751,7 @@
 
     // ---------- MCQ ----------
     async function mcqZone(seg) {
-      const units = C().mcqUnits(seg.blocks);
+      const units = C().mcqUnits(C().splitMcqLines(seg.blocks));
       for (const u of units) {
         if (u.u === "other") { for (const [s, f] of await block(u.block)) push(s, f); blank(); continue; }
         if (u.u === "stim") {
@@ -626,6 +767,12 @@
           }
           continue;
         }
+        // a floating figure anchored in the question or an option line is not part of that line's text
+        const isFloat = (i) => (i.t === "img" || i.t === "shape") && i.floating && !i.consumed;
+        const lifted = u.titleItems.filter(isFloat);
+        for (const o of u.options || []) lifted.push(...o.items.filter(isFloat));
+        u.titleItems = u.titleItems.filter((i) => !isFloat(i));
+        for (const o of u.options || []) o.items = o.items.filter((i) => !isFloat(i));
         let title = await inline(u.titleItems, u.title);
         if (u.source) title += ` #mcq-source[${await inline(u.source, u.title, { noSmall: true })}]`;
         push(title, plainOf(u.title));
@@ -648,61 +795,145 @@
           push(`#${fn}${args.join("")}`, u.options.map((o) => `(${o.letter}) ` + C().itemsText(o.items).replace(new RegExp(OBJ, "g"), "")).join("   "));
           blank();
           if (fn === "mcq-options-list" && u.answer) { push(`উত্তর: #mcq-ans[${u.answer}]`, `উত্তর: ${u.answer}`); blank(); }
+          for (const f of lifted) { const fig = await floatFig(f); if (fig) { push(`#align(${f.wrap === "left" ? "left" : f.wrap === "right" ? "right" : "center"}, ${fig})`, null); blank(); } }
         } else {
-          for (const b of u.optParas) { for (const [s, f] of await block(b)) push(s, f); blank(); }
+          // options that could not be sorted out are printed as they are
+          for (const b of u.optParas) {
+            if (b.kind) { for (const [s, f] of await block(b)) push(s, f); }
+            else { const s = await inline(b.items, null); if (s) push(s, C().itemsText(b.items).replace(new RegExp(OBJ, "g"), "")); }
+            blank();
+          }
           if (u.answer) { push(`উত্তর: #mcq-ans[${u.answer}]`, `উত্তর: ${u.answer}`); blank(); }
+          for (const f of lifted) { const fig = await floatFig(f); if (fig) { push(`#align(${f.wrap === "left" ? "left" : f.wrap === "right" ? "right" : "center"}, ${fig})`, null); blank(); } }
         }
         for (const b of u.after) { for (const [s, f] of await block(b)) push(s, f); blank(); }
+      }
+    }
+
+    // ---------- columns: the document's Word sections ----------
+    // A section with columns is one #bal-cols block; the blocks in it, ordinary text or CQ, flow through its
+    // columns. MCQ parts (and long CQ parts of a one-column section) keep their two columns.
+    let curN = 1, curGap = 14.4, colKey = null, colLine = -1;
+    function closeCols() {
+      if (colKey !== null) {
+        // what pictures that cannot split may leave empty at column ends (about h^2 / column height for each one)
+        lines[colLine] = `#bal-cols(${curN}, ${pt(curGap)}, ${pt(unsplit / 620 / curN)})[`;
+        push("]", null); blank(); colKey = null;
+      }
+      curN = 1;
+    }
+    function openCols(n, gap, key) {
+      if (n > 1 && key === colKey) return;
+      closeCols();
+      if (n > 1) { push("", null); colLine = lines.length - 1; colKey = key; curN = n; curGap = gap; unsplit = 0; }
+    }
+    const colRoom = () => (curN > 1 ? (COL1 - (curN - 1) * curGap) / curN : COL1);
+
+    // the blocks of a normal or CQ part; enter(b) makes sure the right columns (and part) are open for b
+    async function flow(blocks, enter, roles) {
+      let afterFloat = false; // empty paragraphs after a floating figure only made room for it in Word
+      for (let k = 0; k < blocks.length; k++) {
+        const b = blocks[k];
+        enter(b);
+        if (isEmpty(b)) {
+          if (!afterFloat) {
+            const pa = b.para || {};
+            const size = (pa.markSize || 20) / 2;
+            const f = pa.lineRule === "auto" ? pa.line / 240 : 1;
+            push(`#v(${pt(size * WORD_LINE * f + (pa.before || 0) + (pa.after || 0))})`, null);
+            blank();
+          }
+          continue;
+        }
+        // shaded paragraphs next to each other are one band, as in Word
+        if (b.kind === "p" && b.para.shd && !wrapFloat(b)) {
+          const run = [b];
+          while (blocks[k + run.length] && blocks[k + run.length].kind === "p" && blocks[k + run.length].para.shd === b.para.shd && !wrapFloat(blocks[k + run.length]) && blocks[k + run.length].sec === b.sec) run.push(blocks[k + run.length]);
+          const inner = [];
+          for (const x of run) {
+            if (isEmpty(x)) { inner.push(`#v(${pt(((x.para.markSize || 20) / 2) * WORD_LINE)})`); continue; }
+            for (const [s] of await paragraph(x, { inShade: true })) if (s) inner.push(s);
+          }
+          push(`#shade("${b.para.shd}")[${inner.join(" ")}]`, run.map(plainOf).join(" ") || null);
+          blank();
+          k += run.length - 1;
+          afterFloat = false;
+          continue;
+        }
+        const f = wrapFloat(b);
+        const followers = f ? followersFor(blocks, k, f, colRoom()) : [];
+        const sub = roles && roles[k] === "cq-subq";
+        const out = f ? await paragraph(b, { followers }) : await block(b, { noIndent: sub });
+        for (let [s, fb2] of out) {
+          if (sub) s = `#cq-subq[${s}]`;
+          push(s, fb2);
+        }
+        blank();
+        k += followers.length;
+        afterFloat = !!f || (b.kind === "p" && floatsOf(b).length > 0);
       }
     }
 
     // ---------- CQ ----------
     async function cqZone(seg) {
       const roles = C().cqRoles(seg.blocks);
-      for (let i = 0; i < seg.blocks.length; i++) {
-        const b = seg.blocks[i];
-        const f = wrapFloat(b);
-        const followers = f ? followersFor(seg.blocks, i, f, COL2) : [];
-        const out = f ? await paragraph(b, { followers }) : await block(b);
-        for (let [s, fb2] of out) {
-          if (roles[i] === "cq-subq") s = `#cq-subq[${s}]`;
-          push(s, fb2);
-        }
-        blank();
-        i += followers.length;
+      // a run of the part in a one-column Word section keeps that section's width when it is short (a banner, a
+      // title); a longer one is laid out in the part's two columns
+      const runLen = new Map();
+      for (let i = 0; i < seg.blocks.length;) {
+        let j = i;
+        while (j < seg.blocks.length && seg.blocks[j].sec === seg.blocks[i].sec) j++;
+        for (let k = i; k < j; k++) runLen.set(seg.blocks[k], j - i);
+        i = j;
       }
+      let inPart = false;
+      const enter = (b) => {
+        const wordCols = b.secCols || 1;
+        const forced = wordCols === 1 && runLen.get(b) >= 6;
+        const n = wordCols > 1 ? wordCols : forced ? 2 : 1;
+        const key = wordCols > 1 ? `s${b.sec}` : "forced";
+        if (n === curN && (n === 1 || key === colKey)) { if (!inPart) { push("#apply-cq[", null); inPart = true; } return; }
+        if (inPart) { push("]", null); inPart = false; }
+        openCols(n, wordCols > 1 ? b.secGap : 14.4, key);
+        push("#apply-cq[", null);
+        inPart = true;
+      };
+      await flow(seg.blocks, enter, roles);
+      if (inPart) { push("]", null); blank(); }
     }
 
     // ---------- the document ----------
     rowCaptionPass();
     let firstLabel = null;
     zone = "normal";
+    let lastSec = null;
     for (const seg of segs) {
       if (seg.type === "section") {
         if (firstLabel === null) { firstLabel = seg.label || ""; continue; }
-        if (seg.label) { blank(); push(`#set page(header: chapter-header([${esc(seg.label)}]))`, null); blank(); }
+        if (seg.label) { closeCols(); blank(); push(`#set page(header: chapter-header([${esc(seg.label)}]))`, null); blank(); }
         continue;
       }
+      // a Word section that starts on a new page
+      const firstB = seg.blocks && seg.blocks[0];
+      if (firstB && firstB.sec !== lastSec && lastSec !== null && /^(nextPage|oddPage|evenPage)$/.test(firstB.secType || "")) { closeCols(); push("#pagebreak(weak: true)", null); blank(); }
       if (seg.type === "mcq") {
-        push("#apply-mcq[", null); push("#columns(2)[", null);
+        const b0 = seg.blocks[0] || {};
+        const word2 = (b0.secCols || 1) > 1;
+        openCols(2, word2 ? b0.secGap : 14.4, word2 ? `s${b0.sec}` : "forced");
+        push("#apply-mcq[", null);
         zone = "mcq"; await mcqZone(seg); zone = "normal";
-        push("]", null); push("]", null); blank();
+        push("]", null); blank();
       } else if (seg.type === "cq") {
-        push("#apply-cq[", null); push("#columns(2)[", null);
         zone = "cq"; await cqZone(seg); zone = "normal";
-        push("]", null); push("]", null); blank();
       } else {
-        for (let k = 0; k < seg.blocks.length; k++) {
-          const b = seg.blocks[k];
-          const f = wrapFloat(b);
-          if (!f) { for (const [s, fb2] of await block(b)) push(s, fb2); blank(); continue; }
-          const followers = followersFor(seg.blocks, k, f, COL1);
-          for (const [s, fb2] of await paragraph(b, { followers })) push(s, fb2);
-          blank();
-          k += followers.length;
-        }
+        await flow(seg.blocks, (b) => {
+          const n = b.secCols || 1;
+          if (n > 1) openCols(n, b.secGap, `s${b.sec}`); else closeCols();
+        });
       }
+      if (seg.blocks && seg.blocks.length) lastSec = seg.blocks[seg.blocks.length - 1].sec;
     }
+    closeCols();
 
     const head = [
       `// Generated from ${opts.name || "a Word file"} — edit freely, the preview recompiles as you type.`,
@@ -750,7 +981,8 @@
 #let base-weight   = "regular"    // body font weight
 #let base-leading  = 0.60em       // line spacing
 #let base-indent   = 0pt          // first-line indent
-#let eq-indent     = 0.2in        // indent for display (block) math equations
+#let eq-indent     = 0pt          // indent for display (block) math equations
+#let word-leading  = ${WORD_LEADING.toFixed(3)}em     // line spacing of everything outside MCQ: a Word single line of this font
 #let media-folder  = "media"      // "media" for greyscale, "media_color" for colour
 #let header-image        = "templates/header_logo.png"  // header logo
 #let header-image-height = 0.20in
@@ -807,9 +1039,9 @@
 // a picture at its Word size, shrunk to the column when wider
 #let pic(path, w) = layout(size => image(path, width: if type(w) == length { calc.min(w, size.width) } else { w }))
 // a Word drawing (flowchart, labelled boxes) at its Word size, shrunk to the column when wider
-#let fitbox(w, h, body) = layout(size => {
+#let fitbox(w, h, al: center, body) = layout(size => {
   let s = if w > 0pt { calc.min(1, size.width / w) } else { 1 }
-  align(center, scale(x: s * 100%, y: s * 100%, origin: top + left, reflow: true, box(width: w, height: h, body)))
+  align(al, scale(x: s * 100%, y: s * 100%, origin: top + left, reflow: true, box(width: w, height: h, body)))
 })
 
 // a picture that text flows around, as in Word (square wrapping): as many words as fit beside the
@@ -842,8 +1074,69 @@
   let rest = words.slice(if at-break { lo + 1 } else { lo })
   while rest.len() > 0 and rest.first().func() == parbreak { rest = rest.slice(1) }
   // a paragraph cut in the middle continues on the next line, unless the picture reaches lower than the text
-  if not at-break and lo > 0 and rest.len() > 0 and measure(block(width: tw, head)).height >= f.height - 2pt { v(-par.spacing + 0.15em) }
+  if not at-break and lo > 0 and rest.len() > 0 and measure(block(width: tw, head)).height >= f.height - 2pt { v(-par.spacing + par.leading) }
   rest.join([ ])
+})
+
+// a paragraph with its Word settings: space before / after (added to the line gap), line spacing, justification,
+// left / right indent, hanging or first-line indent, keep with next
+// m: a line holding only an equation. Word makes such a line as tall as the equation, so the gaps to its neighbours
+// shrink as it grows (Typst would let a tall inline equation run into the gap and into the line above)
+#let wp(a: 0pt, b: 0pt, l: none, j: true, left: 0pt, right: 0pt, hang: 0pt, first: 0pt, s: false, m: false, body) = {
+  let lead = if l == none { word-leading } else { l }
+  let draw(gap) = block(width: 100%, above: a + gap, below: b + gap, sticky: s, {
+    set par(leading: if m { 0pt } else { lead }, justify: j, hanging-indent: hang, first-line-indent: (amount: first, all: true))
+    pad(left: left, right: right, body)
+  })
+  if m {
+    context {
+      let h = measure({ set par(leading: 0pt); body }).height
+      draw(calc.max(lead.to-absolute() - (h - 0.615em.to-absolute()) / 2, 1.5pt))
+    }
+  } else { draw(lead) }
+}
+
+// a table sized by its content, shrunk when wider than the column
+#let fit-width(body) = layout(size => {
+  let w = measure(body).width
+  if w <= size.width { body } else {
+    let r = size.width / w * 100%
+    scale(x: r, y: r, origin: top + left, reflow: true, box(width: w, body))
+  }
+})
+
+// shaded paragraphs: one band across the column
+#let shade(color, body) = block(fill: rgb("#" + color), width: 100%, inset: (y: 3.5pt), body)
+
+// a line with tabs: every tab goes to the next of Word's tab stops, (position, "l" | "c" | "r"), or else to the next
+// default stop. x0 is where the line starts.
+#let tabbed(stops, every, x0, segs) = context {
+  let x = x0
+  for (i, s) in segs.enumerate() {
+    s
+    x += measure(s).width
+    if i + 1 < segs.len() {
+      let w = measure(segs.at(i + 1)).width
+      let st = stops.find(t => t.at(0) > x + 0.5pt)
+      let pos = if st != none { st.at(0) } else { (calc.floor(x / every) + 1) * every }
+      let kind = if st != none { st.at(1) } else { "l" }
+      let target = if kind == "r" { pos - w } else if kind == "c" { pos - w / 2 } else { pos }
+      let g = calc.max(target - x, 0pt)
+      h(g)
+      x += g
+    }
+  }
+}
+
+// a floating figure that lies over the text at its Word position, taking no room of its own
+#let overlay(x, y, fig) = block(width: 100%, height: 0pt, above: 0pt, below: 0pt, sticky: true, place(top + left, dx: x, dy: y, fig))
+
+// Word's columns: filled evenly, as Word balances a section that ends on the page, and running over pages
+#let bal-cols(n, gutter, room, body) = layout(size => {
+  let cw = (size.width - (n - 1) * gutter) / n
+  let h = measure(block(width: cw, body)).height
+  // a little more than an even share: lines, pictures and tables cannot split at the bottom of a column
+  block(width: 100%, height: h / n * 1.04 + room + 16pt, breakable: true, columns(n, gutter: gutter, body))
 })
 
 // a numbered paragraph as in Word: the text starts at left, the label sits in the hanging space before it
@@ -868,6 +1161,7 @@
 // Even page : Left = Subject ▶ …    | Right = logo
 // A new chapter changes it with  #set page(header: chapter-header([New text]))
 #let chapter-header(label) = context [
+  #set block(spacing: 1.2em)
   #set text(font: footer-font, size: 10pt)
   #let page-num = counter(page).get().first()
   #if calc.odd(page-num) {
@@ -881,8 +1175,12 @@
 
 #let apply-page-setup(body, label: []) = {
   set text(font: base-font, size: base-size, lang: "bn")
-  set par(justify: true, leading: base-leading, first-line-indent: base-indent)
-  show strong: it => text(stroke: 0.3pt + black, it.body)
+  set par(justify: true, leading: word-leading, spacing: word-leading, first-line-indent: base-indent)
+  set block(spacing: word-leading)
+  // Kalpurush has no bold: thicken the letters in their own colour (white on a dark label stays white)
+  show strong: it => context text(stroke: 0.3pt + text.fill, it.body)
+  // Bangla inside an equation is in Kalpurush too
+  show math.equation: set text(font: ("New Computer Modern Math", "Kalpurush"))
   show math.equation.where(block: true): eq => pad(left: eq-indent)[#eq]
   show heading.where(level: 1): it => [
     #set text(size: topic-size, weight: "bold")
@@ -911,6 +1209,7 @@
     header: chapter-header(label),
     // Odd page : Left = logo | Right = page no.     Even page : Left = page no. | Right = logo
     footer: context [
+      #set block(spacing: 1.2em)
       #line(length: 100%, stroke: rule-stroke)
       #v(-0.5em)
       #set text(font: footer-font, size: footer-size)
@@ -981,7 +1280,8 @@
 // ── Block wrapper ─────────────────────────────────────────────────────────────
 #let apply-mcq(body) = {
   set text(font: base-font, size: mcq-size, weight: base-weight, lang: "bn")
-  set par(justify: true, leading: base-leading, first-line-indent: 0pt, hanging-indent: question-hanging-indent)
+  set par(justify: true, leading: base-leading, spacing: 1.2em, first-line-indent: 0pt, hanging-indent: question-hanging-indent)
+  set block(spacing: 1.2em)
 
   // bracket option labels become open circles
   show "(ক)": opt-circle("ক")
@@ -1019,7 +1319,7 @@
 
 #let apply-cq(body) = {
   set text(font: base-font, size: cq-size, weight: base-weight, lang: "bn")
-  set par(justify: true, leading: base-leading, first-line-indent: 0pt)
+  set par(justify: true, first-line-indent: 0pt)
   block(width: 100%, inset: cq-block-padding)[#body]
 }
 `;

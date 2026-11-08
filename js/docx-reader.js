@@ -86,6 +86,8 @@
         id, type: wval(s, "type"), name: nameEl ? wval(nameEl) : id,
         basedOn: wval(wkid(s, "basedOn")),
         r: runProps(wkid(s, "rPr")), p: paraProps(wkid(s, "pPr")),
+        tblBorders: bordersOf(wkid(wkid(s, "tblPr"), "tblBorders")),
+        cellMar: marginsOf(wkid(wkid(s, "tblPr"), "tblCellMar")),
       };
       if (wval(s, "type") === "paragraph" && wval(s, "default") === "1") defaultPara = id;
     }
@@ -124,6 +126,36 @@
     return o;
   }
 
+  const flatInd = (i) => {
+    const o = {};
+    if (i.left != null) o.indLeft = i.left;
+    if (i.right != null) o.indRight = i.right;
+    if (i.hanging != null) o.indHang = i.hanging;
+    return o;
+  };
+
+  // <w:tblBorders> / <w:tcBorders>: { top, left, bottom, right, insideH, insideV } -> { w (pt), color } or null for none
+  function bordersOf(el) {
+    if (!el) return null;
+    const o = {};
+    for (const b of kids(el)) {
+      const v = wval(b);
+      const side = { start: "left", end: "right" }[b.localName] || b.localName;
+      if (!v || v === "none" || v === "nil") { o[side] = null; continue; }
+      const c = wval(b, "color");
+      o[side] = { w: Math.max(0.25, (parseInt(wval(b, "sz"), 10) || 4) / 8), color: c && c !== "auto" ? c : "000000" };
+    }
+    return o;
+  }
+
+  // <w:tblCellMar> / <w:tcMar>: margins in points
+  function marginsOf(el) {
+    if (!el) return null;
+    const o = {};
+    for (const m of kids(el)) { const side = { start: "left", end: "right" }[m.localName] || m.localName; o[side] = (parseInt(wval(m, "w"), 10) || 0) / 20; }
+    return o;
+  }
+
   function paraProps(pPr) {
     const o = {};
     if (!pPr) return o;
@@ -138,8 +170,15 @@
       else if (n === "numPr") {
         const id = wval(wkid(c, "numId")), lvl = wval(wkid(c, "ilvl"));
         o.num = { id, lvl: parseInt(lvl || "0", 10) };
-      } else if (n === "ind") o.ind = indOf(c);
-      else if (n === "pBdr") o.border = kids(c).some((b) => wval(b) && wval(b) !== "none" && wval(b) !== "nil");
+      } else if (n === "ind") Object.assign(o, flatInd(indOf(c)));
+      else if (n === "spacing") {
+        const tw = (k) => { const v = wval(c, k); return v == null ? null : parseInt(v, 10) || 0; };
+        if (tw("before") != null) o.before = tw("before") / 20;
+        if (tw("after") != null) o.after = tw("after") / 20;
+        if (tw("line") != null) { o.line = tw("line"); o.lineRule = wval(c, "lineRule") || "auto"; }
+      } else if (n === "tabs") {
+        o.tabs = kids(c).filter((t) => t.localName === "tab" && wval(t) !== "clear").map((t) => ({ pos: (parseInt(wval(t, "pos"), 10) || 0) / 20, val: wval(t) || "left" }));
+      } else if (n === "pBdr") o.border = kids(c).some((b) => wval(b) && wval(b) !== "none" && wval(b) !== "nil");
       else if (n === "rPr") o.markRun = runProps(c);
     }
     return o;
@@ -306,11 +345,18 @@
       const pg = wkid(sp, "pgSz"), mar = wkid(sp, "pgMar"), cols = wkid(sp, "cols");
       const n = Math.max(1, tw(cols, "num") || 1);
       const w = (tw(pg, "w") || 11906) - tw(mar, "left") - tw(mar, "right");
-      return { colW: (w - (n - 1) * (cols && wval(cols, "space") != null ? tw(cols, "space") : 720)) / n / 20, marL: tw(mar, "left") / 20 };
+      const gap = cols && wval(cols, "space") != null ? tw(cols, "space") : 720;
+      const type = wval(wkid(sp, "type")) || "nextPage";
+      return { colW: (w - (n - 1) * gap) / n / 20, marL: tw(mar, "left") / 20, cols: n, gap: gap / 20, type };
     });
 
-    const blocks = [];
+    const out = [];
     let sec = 0;
+    // every block knows its Word section: the number of columns, their gap and how the section starts
+    const blocks = { push(...xs) {
+      const si = colWidths[Math.min(sec, colWidths.length - 1)] || {};
+      for (const x of xs) { if (x.kind !== "section") Object.assign(x, { sec, secCols: si.cols || 1, secGap: si.gap, secType: si.type, colW: si.colW }); out.push(x); }
+    } };
     blocks.push({ kind: "section", label: labels[0] || null });
     for (const c of kids(body)) {
       if (c.namespaceURI !== W) continue;
@@ -331,7 +377,10 @@
         }
       }
     }
-    return { blocks, getMedia, zip, doc, mainPath, sectionLabels };
+    const settings = await readXml(zip, `${mainDir}settings.xml`);
+    const dts = settings && settings.getElementsByTagNameNS(W, "defaultTabStop")[0];
+    const defaultTab = dts ? (parseInt(wval(dts), 10) || 720) / 20 : 36;
+    return { blocks: out, getMedia, zip, doc, mainPath, sectionLabels, defaultTab };
   }
 
   // ---------- paragraphs ----------
@@ -339,7 +388,7 @@
     const { st } = ctx;
     const direct = paraProps(wkid(p, "pPr"));
     const styleId = direct.style || st.defaultPara;
-    const sp = Object.assign({}, st.defaults.p, styleChain(st, styleId, "p"), direct);
+    const sp = Object.assign({}, st.defaults.p, ctx.tblP || {}, styleChain(st, styleId, "p"), direct);
     const styleName = (st.styles[styleId] && st.styles[styleId].name) || styleId || "";
     const baseRun = Object.assign({}, st.defaults.r, styleChain(st, styleId, "r"));
 
@@ -356,12 +405,13 @@
       else merged.push(it);
     }
     const label = sp.num ? ctx.numLabel(sp.num) : null;
-    let list = null;
+    let list = null, numInd = null;
     if (label) {
       const def = ctx.numLabel.lastDef || {};
       merged.unshift(Object.assign({ t: "text", text: label + " ", b: false, label: true }, def.run || {}));
+      numInd = def.ind || null;
       // indents: the numbering level's, overridden by the paragraph's own (style indents come first)
-      const ind = Object.assign({}, styleChain(st, styleId, "p").ind || {}, def.ind || {}, direct.ind || {});
+      const ind = paraInd(st, styleId, numInd, direct);
       if (ind.left > 0) list = { left: ind.left, hanging: Math.max(0, Math.min(ind.left, ind.hanging || 0)), jc: def.jc || "left" };
     }
 
@@ -370,12 +420,20 @@
     const para = {
       jc: sp.jc || "", shd: sp.shd || "", border: !!sp.border, keepNext: !!sp.keepNext,
       pageBreakBefore: !!sp.pageBreakBefore, styleName, list,
+      before: sp.before || 0, after: sp.after || 0, line: sp.line || 240, lineRule: sp.lineRule || "auto",
+      ind: paraInd(st, styleId, numInd, direct), tabs: sp.tabs || [], markSize: (sp.markRun && sp.markRun.sz) || baseRun.sz || 0,
       heading: headingLevel(styleName, sp.outline),
       allBold: textRuns.length > 0 && textRuns.every((r) => r.b),
       maxSize: Math.max(0, ...textRuns.map((r) => r.sz || 0)),
     };
     const out = [{ kind: "p", items: merged, text, para, node: p }];
     return out.concat(extra);
+  }
+
+  // a paragraph's indents (points): the style's, then the numbering level's, then its own
+  function paraInd(st, styleId, numInd, direct) {
+    const pick = (k, n) => (direct[k] != null ? direct[k] : numInd && numInd[n] != null ? numInd[n] : (styleChain(st, styleId, "p")[k] != null ? styleChain(st, styleId, "p")[k] : (st.defaults.p[k] || 0)));
+    return { left: pick("indLeft", "left"), right: pick("indRight", "right"), hanging: pick("indHang", "hanging") };
   }
 
   function headingLevel(name, outline) {
@@ -399,7 +457,10 @@
       } else if (c.namespaceURI === M) {
         if (n === "oMath") items.push({ t: "math", tex: OMML.tex(c, false), display: false });
         else if (n === "oMathPara") {
-          for (const om of kids(c)) if (om.localName === "oMath") items.push({ t: "math", tex: OMML.tex(om, false), display: true });
+          const pr = kids(c).find((x) => x.localName === "oMathParaPr");
+          const jcEl = pr && kids(pr).find((x) => x.localName === "jc");
+          const mjc = jcEl ? jcEl.getAttributeNS(M, "val") : "";
+          for (const om of kids(c)) if (om.localName === "oMath") items.push({ t: "math", tex: OMML.tex(om, false), display: true, mjc });
         }
       } else if (n === "AlternateContent") {
         const choice = kids(c).find((x) => x.localName === "Choice") || kids(c).find((x) => x.localName === "Fallback");
@@ -497,7 +558,8 @@
       const off = kids(posV).find((c) => c.localName === "posOffset");
       if (off) dy = Math.max(0, (parseInt(off.textContent, 10) || 0) / 12700);
     }
-    return { wrap: wrapped ? side : "", dy, x, colW: (ctx && ctx.colW) || 0 };
+    const wrapType = wrap ? wrap.localName.replace(/^wrap/, "").toLowerCase() : "none";
+    return { wrap: wrapped ? side : "", wrapType, behind: anchor.getAttribute("behindDoc") === "1", dy, x, colW: (ctx && ctx.colW) || 0 };
   }
 
   function picItem(pic, ctx) {
@@ -548,6 +610,18 @@
       const edges = kids(borders);
       if (edges.length && edges.every((e) => ["none", "nil"].includes(wval(e) || ""))) bordered = false;
     }
+    // geometry and borders as Word resolves them: the table's own settings over its style's
+    const st = ctx.st;
+    const styleId = wval(wkid(tblPr, "tblStyle"));
+    const chain = [];
+    for (let id = styleId, g = 0; id && st.styles[id] && g < 8; id = st.styles[id].basedOn, g++) chain.unshift(st.styles[id]);
+    const tblBorders = Object.assign({}, ...chain.map((x) => x.tblBorders || {}), bordersOf(borders) || {});
+    const cellMar = Object.assign({ left: 5.4, right: 5.4, top: 0, bottom: 0 }, ...chain.map((x) => x.cellMar || {}), marginsOf(wkid(tblPr, "tblCellMar")) || {});
+    const wEl = wkid(tblPr, "tblW"), indEl = wkid(tblPr, "tblInd");
+    const width = wEl ? { type: wval(wEl, "type") || "auto", w: parseInt(wval(wEl, "w"), 10) || 0 } : { type: "auto", w: 0 };
+    const nested = !!ctx.tblP;
+    const outerP = ctx.tblP;
+    ctx.tblP = Object.assign({}, styleId ? styleChain(st, styleId, "p") : {}); // the table style's paragraph settings apply in its cells
     const rows = [];
     for (const tr of kids(tbl).filter((c) => c.localName === "tr")) {
       const cells = [];
@@ -565,6 +639,8 @@
         }
         cells.push({
           blocks, fill,
+          borders: bordersOf(wkid(pr, "tcBorders")),
+          mar: marginsOf(wkid(pr, "tcMar")),
           span: parseInt(wval(wkid(pr, "gridSpan")) || "1", 10) || 1,
           vmerge: vm ? (wval(vm) === "restart" ? "restart" : "continue") : "",
           valign: wval(wkid(pr, "vAlign")) || "",
@@ -572,7 +648,9 @@
       }
       rows.push({ cells, header: !!wkid(wkid(tr, "trPr"), "tblHeader") });
     }
-    return { kind: "table", rows, cols, bordered, node: tbl };
+    ctx.tblP = outerP;
+    return { kind: "table", rows, cols, bordered, node: tbl, tblBorders, cellMar, width, nested,
+      jc: wval(wkid(tblPr, "jc")) || "", ind: indEl ? (parseInt(wval(indEl, "w"), 10) || 0) / 20 : 0 };
   }
 
   root.DocxReader = { read, readParagraph, readTable, OBJ, W, A, R, WP, kids, firstDesc };

@@ -44,8 +44,8 @@
     let depth = 0;
     for (let i = 0; i < lines.length; i++) {
       const t = lines[i];
-      const opener = /^#apply-(mcq|cq)\[$/.test(t) ? 1 : /^#columns\(\d+\)\[$/.test(t) ? 0 : null;
-      const plain = !t.trim() || /^(\/\/|#import|#show|#set|#let|#\[|\])/.test(t) || opener !== null;
+      const opener = /^#(apply-(mcq|cq)\[|bal-cols\(.*\)\[)$/.test(t) ? 1 : /^#columns\(\d+\)\[$/.test(t) ? 0 : null;
+      const plain = !t.trim() || /^(\/\/|#import|#show|#set|#let|#\[|\]|#pagebreak)/.test(t) || opener !== null;
       if (!plain && depth === 0) {
         out.push(`#context [#metadata((l: ${i}, z: ${stack.includes(1) ? 1 : 0}, p: here().position()))<__src>]`, "");
         map.push(i, i);
