@@ -23,10 +23,12 @@ Layout (both pages, like VS Code):
 
 What the Typst page takes from the Word file:
 
+- **Page.** Size and margins are the Word file's own (`page-width`, `page-height`, `page-margin` at the top of `page_setup_template.typ`), so page breaks fall where Word's do.
 - **Columns.** Each Word section keeps its own columns and gap, filled evenly like Word. MCQ parts always have two columns, and so do long CQ parts of a one-column section.
 - **Paragraphs.** Space before and after, line spacing, alignment, left / right / hanging / first-line indents, keep-with-next. Shaded paragraphs next to each other make one band.
 - **Tabs.** Word's own tab stops (left, centre, right), then its default stops.
-- **Tables.** Column widths, position, borders per cell, cell margins, vertical alignment, fills. Tables with many narrow columns fit their content.
+- **Tables.** Column widths, position, borders per cell, cell margins, vertical alignment, fills. Tables with many narrow columns fit their content. Empty lines in a cell stay, so the columns of a financial statement line up.
+- **Borders.** A paragraph's own borders (the rule under a total) and shape borders with their rounded corners; a text box grows with its text and keeps its bullets and indents.
 - **Text.** Sizes and colours as set in Word.
 - **Figures.** Floating figures at their Word position; pictures follow their paragraph's alignment.
 
@@ -80,3 +82,8 @@ images/      pictures        templates/  logos
 - a box can break inside its table
 
 The styler's own files are left as they are.
+
+## The other tools
+
+- **Styler** (`index.html`) and **HTML / PDF** (`html.html`, `pdf.html`): one Word paragraph that holds a question, its options and its answer on separate lines is now taken apart, so those questions get their circled options and answer circle (127 instead of 22 in a Higher Math chapter).
+- **HTML / PDF**: pages use the Word file's own size; paragraphs and tables take Word's spacing, line height, alignment, indents, borders, cell margins and column widths. A table whose cell is taller than a page is cut through the cell, as Word does.

@@ -289,35 +289,43 @@
   // the blocks with such a paragraph cut into its parts: the question, each line of options, the answer line, and
   // everything after the answer (an explanation) still together with its line breaks. The pieces have no XML node:
   // their equations were linked to their items before.
-  function splitMcqLines(blocks) {
-    const out = [];
+  // The lines (separated by line breaks) of such a paragraph, grouped: [[0], [1], [2], [3, 4, 5]] = the question,
+  // two option lines, then the answer line with what follows it. null when there is nothing to separate.
+  function mcqLineGroups(b) {
+    if (b.kind !== "p" || !b.items.some((i) => i.t === "br") || !/\(\s*[কখগঘঙ]\s*\)|উত্তর/.test(b.text)) return null;
     const isOpt = (t) => /^\s*\(\s*[কখগঘঙ]\s*\)/.test(t);
     const isAns = (t) => ANS_LETTER.test(t.trim());
+    const lines = [[]];
+    for (const it of b.items) { if (it.t === "br") lines.push([]); else lines[lines.length - 1].push(it); }
+    const flat = lines.map((items) => items.map((i) => (i.t === "text" ? i.text : OBJ)).join(""));
+    // an ordinary paragraph that only mentions an option
+    if (!flat.some((t) => isOpt(t) || isAns(t))) return null;
+    const groups = [];
+    let cur = [], answered = false;
+    const flush = () => { if (cur.length) groups.push(cur); cur = []; };
+    flat.forEach((t, n) => {
+      if (answered) { cur.push(n); return; }
+      if (isAns(t)) { flush(); groups.push([n]); answered = true; return; }
+      if (isOpt(t)) { flush(); groups.push([n]); return; }
+      cur.push(n);
+    });
+    flush();
+    // lines with nothing on them are dropped
+    const full = groups.filter((g) => g.some((n) => flat[n].trim() || lines[n].some((i) => i.t !== "text")));
+    return full.length > 1 ? { groups: full, lines } : null;
+  }
+
+  function splitMcqLines(blocks) {
+    const out = [];
     for (const b of blocks) {
-      if (b.kind !== "p" || !b.items.some((i) => i.t === "br") || !/\(\s*[কখগঘঙ]\s*\)|উত্তর/.test(b.text)) { out.push(b); continue; }
-      const lines = [[]];
-      for (const it of b.items) { if (it.t === "br") lines.push([]); else lines[lines.length - 1].push(it); }
-      const text = (items) => items.map((i) => (i.t === "text" ? i.text : OBJ)).join("");
-      const flat = lines.map(text);
-      // nothing to separate: an ordinary paragraph that only mentions an option
-      if (!flat.some((t) => isOpt(t) || isAns(t))) { out.push(b); continue; }
-      let cur = [];
-      const flush = () => {
-        if (!cur.length) return;
+      const g = mcqLineGroups(b);
+      if (!g) { out.push(b); continue; }
+      for (const grp of g.groups) {
         const items = [];
-        cur.forEach((l, n) => { if (n) items.push({ t: "br" }); items.push(...l); });
+        grp.forEach((n, k) => { if (k) items.push({ t: "br" }); items.push(...g.lines[n]); });
         const t = items.map((i) => (i.t === "text" ? i.text : i.t === "br" ? "\n" : OBJ)).join("");
-        if (t.trim() || items.some((i) => i.t !== "text" && i.t !== "br")) out.push(Object.assign({}, b, { items, text: t, node: null }));
-        cur = [];
-      };
-      let answered = false;
-      lines.forEach((l, n) => {
-        if (answered) { cur.push(l); return; }
-        if (isAns(flat[n])) { flush(); cur.push(l); flush(); answered = true; return; }
-        if (isOpt(flat[n])) { flush(); cur.push(l); flush(); return; }
-        cur.push(l);
-      });
-      flush();
+        out.push(Object.assign({}, b, { items, text: t, node: null }));
+      }
     }
     return out;
   }
@@ -390,5 +398,5 @@
     });
   }
 
-  root.Classify = { segment, mcqUnits, splitMcqLines, cqRoles, tableOptions, isStim, OPT_MARK_G, BOARD_TAIL, Q_START, splitSource, sliceItems, trimItems, itemsText, isBanner, clean };
+  root.Classify = { segment, mcqUnits, splitMcqLines, mcqLineGroups, cqRoles, tableOptions, isStim, OPT_MARK_G, BOARD_TAIL, Q_START, splitSource, sliceItems, trimItems, itemsText, isBanner, clean };
 })(typeof globalThis !== "undefined" ? globalThis : this);

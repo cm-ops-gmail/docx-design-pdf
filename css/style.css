@@ -3,12 +3,14 @@
   --font: "Kalpurush", "Noto Serif Bengali", serif;
   --gap: 0.6em;          /* space between paragraphs */
   --lh: 1.21;            /* line pitch (Typst leading 0.6em with Kalpurush) */
+  --pw: 8.5in;           /* page size: set from the Word file when one is opened */
+  --ph: 10.6in;
 }
 
 .page {
   position: relative;
-  width: 8.5in;
-  height: 10.6in;
+  width: var(--pw);
+  height: var(--ph);
   background: #fff;
   color: #000;
   overflow: hidden;
@@ -30,15 +32,15 @@
 .hdr .rule { margin-top: 2.5pt; }
 
 /* footer: odd = logo | page no., even = page no. | logo */
-.ftr { position: absolute; left: 0.58in; right: 0.58in; top: calc(10.6in - 0.68in + 0.03in); }
+.ftr { position: absolute; left: 0.58in; right: 0.58in; top: calc(var(--ph) - 0.68in + 0.03in); }
 .ftr-row { display: flex; justify-content: space-between; align-items: center; margin-top: 4pt; height: 0.28in; }
 .ftr-logo { height: 0.28in; width: auto; display: block; }
 .ftr-num { font-size: 10pt; line-height: 1; }
 
-.body { position: absolute; top: 0.68in; left: 0.58in; width: calc(8.5in - 1.16in); height: calc(10.6in - 1.36in); }
+.body { position: absolute; top: 0.68in; left: 0.58in; width: calc(var(--pw) - 1.16in); height: calc(var(--ph) - 1.36in); }
 .region { position: absolute; left: 0; width: 100%; }
-.region.two { display: flex; gap: calc((8.5in - 1.16in) * 0.04); align-items: flex-start; }
-.region.two > .col { flex: 0 0 calc((8.5in - 1.16in) * 0.48); width: calc((8.5in - 1.16in) * 0.48); }
+.region.two { display: flex; gap: calc((var(--pw) - 1.16in) * 0.04); align-items: flex-start; }
+.region.two > .col { flex: 0 0 calc((var(--pw) - 1.16in) * 0.48); width: calc((var(--pw) - 1.16in) * 0.48); }
 .region > .col { min-width: 0; }
 
 /* the hidden box blocks are measured in: same fonts and widths as the page */
@@ -50,7 +52,10 @@
 
 /* ----- blocks ----- */
 .p, .fig, .eq, .tbl, .mq, .textbox { display: flow-root; margin: 0; }
-.p { padding-bottom: var(--gap); text-align: justify; text-justify: inter-word; }
+.p { padding-bottom: var(--after, var(--gap)); text-align: justify; text-justify: inter-word; }
+/* a paragraph with its Word settings (.w): spacing, line height, alignment, indents and borders are set on it */
+.p.w.shd { padding-left: 0; padding-right: 0; padding-top: 0; margin-bottom: 0; }
+.p.w.in-cell + .p.w.in-cell { margin-top: 0; }
 .p.center { text-align: center; }
 .p.right { text-align: right; }
 .p.brk { padding-bottom: 0; text-align-last: justify; }
@@ -92,6 +97,11 @@ img.pic { max-width: 100%; height: auto; vertical-align: middle; }
 .tbl td.head { background: #f2f2f2; }
 .tbl td.row0 { text-align: center; }
 .tbl.plain td { border: none; padding: 1pt 4pt; }
+/* a table with its Word settings (.w): borders, cell margins and vertical alignment are set on each cell */
+.tbl.w { display: table; width: 100%; table-layout: fixed; border-collapse: collapse; margin-bottom: 0; }
+.tbl.w td { border: none; padding: 0 5.4pt; vertical-align: top; overflow-wrap: anywhere; }
+.tbl.w.dense td { padding-left: 2px; padding-right: 2px; }
+.p .lab { display: inline-block; text-indent: 0; padding-right: 0.3em; box-sizing: border-box; }
 .p.in-cell { padding: 0; text-align: left; }
 .p.in-cell + .p.in-cell { margin-top: 0.3em; }
 .tbl td.row0 .p.in-cell { text-align: center; }

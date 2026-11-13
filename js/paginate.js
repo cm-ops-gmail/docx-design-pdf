@@ -8,11 +8,31 @@
   "use strict";
 
   const IN = 96;
-  const PAGE_W = 8.5 * IN, PAGE_H = 10.6 * IN;
   const MT = 0.68 * IN, MB = 0.68 * IN, ML = 0.58 * IN, MR = 0.58 * IN;
-  const CW = PAGE_W - ML - MR, CH = PAGE_H - MT - MB;
-  const GUT = 0.04 * CW;
-  const COLW = (CW - GUT) / 2;
+  // the page size is the Word file's: --pw / --ph on the document (8.5in x 10.6in when not set)
+  let PAGE_W = 8.5 * IN, PAGE_H = 10.6 * IN, CW, CH, GUT, COLW;
+  function readGeom() {
+    const cs = getComputedStyle(document.documentElement);
+    const len = (v, d) => { const m = /([\d.]+)\s*(in|pt|px)/.exec(v || ""); return m ? parseFloat(m[1]) * (m[2] === "in" ? IN : m[2] === "pt" ? IN / 72 : 1) : d; };
+    PAGE_W = len(cs.getPropertyValue("--pw"), 8.5 * IN);
+    PAGE_H = len(cs.getPropertyValue("--ph"), 10.6 * IN);
+    CW = PAGE_W - ML - MR; CH = PAGE_H - MT - MB;
+    GUT = 0.04 * CW;
+    COLW = (CW - GUT) / 2;
+    Object.assign(root.PageGeom || (root.PageGeom = {}), { PAGE_W, PAGE_H, MT, MB, ML, MR, CW, CH, GUT, COLW });
+  }
+  // page: { w, h } in points (the Word file's page)
+  function setPage(page) {
+    const st = document.documentElement.style;
+    let tag = document.getElementById("page-size");
+    if (!tag) { tag = document.createElement("style"); tag.id = "page-size"; document.head.appendChild(tag); }
+    if (page && page.w && page.h) {
+      st.setProperty("--pw", page.w + "pt"); st.setProperty("--ph", page.h + "pt");
+      tag.textContent = `@page { size: ${page.w}pt ${page.h}pt; margin: 0; }`;
+    } else { st.removeProperty("--pw"); st.removeProperty("--ph"); tag.textContent = ""; }
+    readGeom();
+  }
+  readGeom();
   const REGION_GAP = 10;
   const BN = "০১২৩৪৫৬৭৮৯";
   const bnNum = (n) => String(n).replace(/\d/g, (d) => BN[d]);
@@ -22,6 +42,7 @@
 
   class Paginator {
     constructor(host, measureHost, opts) {
+      readGeom();
       this.host = host;
       this.meas = measureHost;
       this.opts = opts || {};
@@ -232,7 +253,7 @@
       box.appendChild(item.el);
       let parts = null;
       if (item.split === "text") parts = splitText(item.el, limit);
-      else if (item.split === "table") parts = splitTable(item.el, limit);
+      else if (item.split === "table") parts = splitTable(item.el, limit) || sliceTable(item.el, limit);
       else if (item.split === "kids") parts = splitKids(item.el, limit);
       if (!parts) return null;
       return parts.map((e) => {
@@ -315,10 +336,52 @@
     for (let i = 0; i < rows.length - 1; i++) {
       if (rows[i].getBoundingClientRect().bottom - top <= limit - 2) k = i; else break;
     }
+    // never cut through a cell that spans rows: back up to a row boundary no such cell crosses
+    const crosses = (kk) => rows.slice(0, kk + 1).some((r, i) => Array.from(r.cells).some((td) => td.rowSpan > 1 && i + td.rowSpan - 1 > kk));
+    while (k >= 0 && crosses(k)) k--;
     if (k < 0) return null;
     const a = t.cloneNode(true), b = t.cloneNode(true);
     Array.from(a.rows).slice(k + 1).forEach((r) => r.remove());
     Array.from(b.rows).slice(0, k + 1).forEach((r) => r.remove());
+    b.classList.add("cont");
+    return [a, b];
+  }
+
+  // A table whose rows do not fit on a page, a single tall row (a statement in one cell): cut through the row as Word
+  // does. Every cell hands the blocks below the cut to the continuation, so the columns stay level.
+  function sliceTable(t, limit) {
+    const top = t.getBoundingClientRect().top;
+    const cut = top + limit - 2;
+    const cells = Array.from(t.querySelectorAll(":scope > tbody > tr > td, :scope > tr > td"));
+    if (!cells.length) return null;
+    const a = t.cloneNode(true), b = t.cloneNode(true);
+    const ca = Array.from(a.querySelectorAll(":scope > tbody > tr > td, :scope > tr > td"));
+    const cb = Array.from(b.querySelectorAll(":scope > tbody > tr > td, :scope > tr > td"));
+    let kept = 0, moved = 0;
+    cells.forEach((td, i) => {
+      const kids = Array.from(td.children);
+      const ka = Array.from(ca[i].children), kb = Array.from(cb[i].children);
+      kids.forEach((k, j) => {
+        if (k.getBoundingClientRect().bottom <= cut) { kb[j].remove(); kept++; } else { ka[j].remove(); moved++; }
+      });
+    });
+    if (!kept || !moved) return null; // nothing fits above the cut, or nothing is left for the next page
+    const empty = (td) => !td.children.length && !td.textContent.trim();
+    // rows left without content, unless a cell above reaches down into them
+    const prune = (tbl, keepIf) => {
+      const rows = Array.from(tbl.rows);
+      const rowOf = new Map(rows.map((r, i) => [r, i]));
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const r = rows[i];
+        if (!Array.from(r.cells).every(empty) || !keepIf(i, r)) continue;
+        // a cell of an earlier row that spans this one gets shorter
+        for (let k = 0; k < i; k++) for (const td of rows[k].cells) if (td.rowSpan > 1 && k + td.rowSpan > i) td.rowSpan = Math.max(1, td.rowSpan - 1);
+        r.remove();
+      }
+    };
+    prune(a, () => true);
+    prune(b, () => true);
+    if (!a.rows.length || !b.rows.length) return null;
     b.classList.add("cont");
     return [a, b];
   }
@@ -373,5 +436,5 @@
   }
 
   root.Paginator = Paginator;
-  root.PageGeom = { PAGE_W, PAGE_H, MT, MB, ML, MR, CW, CH, GUT, COLW };
+  root.PageSetup = { setPage, readGeom };
 })(typeof globalThis !== "undefined" ? globalThis : this);

@@ -17,7 +17,8 @@
   const pt = (n) => (Math.round(n * 100) / 100) + "pt";
   const EMU_PT = 12700;
   // text width of the Typst page (8.5in - 2 x 0.58in) and of one column of #columns(2) (4% gutter), points
-  const COL1 = 528.48, COL2 = (COL1 * 0.96) / 2;
+  // (COL1 is set again from the Word file's own page for every document)
+  let COL1 = 528.48, COL2 = (COL1 * 0.96) / 2;
   // Kalpurush: a single line in Word is 1.575em (ascent + descent + line gap); Typst measures a line from cap
   // height (0.615em) to the baseline, the rest is leading
   const WORD_LINE = 1.575, CAP = 0.615;
@@ -100,6 +101,10 @@
     opts = opts || {};
     const meta = Object.assign(guessMeta(opts.name), Object.fromEntries(Object.entries(opts.meta || {}).filter(([, v]) => v)));
     const media = createMedia(model, mediaPrefix(meta));
+    // the page comes from the Word file: its size and margins (the template's 8.5in x 10.6in when it has none)
+    const pg = model.page || { w: 612, h: 763.2, top: 48.96, bottom: 48.96, left: 41.76, right: 41.76 };
+    COL1 = pg.w - pg.left - pg.right;
+    COL2 = (COL1 * 0.96) / 2;
     let zone = "normal";     // "normal" | "mcq" | "cq": the part being written
     let unsplit = 0;         // the open columns: sum of h^2 of the pictures in them
     // (curN / curGap: the columns being written, declared with the column code below)
@@ -278,6 +283,26 @@
       if (pa.keepNext) args.push("s: true");
       if (o.mathLine) args.push("m: true");
       return args.length ? `#wp(${args.join(", ")})[${s}]` : s;
+    }
+
+    // an empty paragraph as a line of its own height (and its borders, such as the rule under a total)
+    function emptyLine(b) {
+      const size = ((b.para && b.para.markSize) || 20) / 2;
+      const z = size === 10 ? "#sym.zws" : `#text(size: ${pt(size)})[#sym.zws]`;
+      return bordered(wordPara(z, b, { lone: true }), b);
+    }
+
+    // the paragraph's own borders (Word's pBdr): any of its four sides
+    function bordered(s, b) {
+      const B = b.para && b.para.borders;
+      if (!B) return s;
+      const side = (k) => (B[k] ? `${k}: ${pt(B[k].w)} + ${/^0{6}$/.test(B[k].color) ? "black" : `rgb("#${B[k].color}")`}` : null);
+      const st = ["top", "bottom", "left", "right"].map(side).filter(Boolean);
+      if (!st.length) return s;
+      // Word draws the rule below the line box (0.4em under the baseline) and above it (0.56em over cap height)
+      const ins = [B.top ? `top: ${pt(B.top.space)} + 0.5em` : null, B.bottom ? `bottom: ${pt(B.bottom.space)} + 0.4em` : null,
+        B.left ? `left: ${pt(Math.max(1, B.left.space))}` : null, B.right ? `right: ${pt(Math.max(1, B.right.space))}` : null].filter(Boolean);
+      return `#block(width: 100%, stroke: (${st.join(", ")}), inset: (${ins.join(", ")}${ins.length === 1 ? "," : ""}))[${s}]`;
     }
 
     const alignOf = (jc, s) => (jc === "center" ? `#align(center)[${s}]` : jc === "right" || jc === "end" ? `#align(right)[${s}]` : s);
@@ -467,8 +492,8 @@
         if (!o.plain) s = wordPara(s, b, { lone, mathLine: lone, listed, noIndent: o.noIndent });
         // shaded paragraphs next to each other become one band: see shadeRun (a cell has no such run)
         if (o.inCell && pa.shd) s = `#block(fill: rgb("#${pa.shd}"), width: 100%)[${s}]`;
+        if (!o.plain) s = bordered(s, b);
         if (!o.inShade && !o.inCell && pa.shd) s = `#shade("${pa.shd}")[${s}]`;
-        else if (!o.inCell && pa.border) s = `#block(stroke: 0.7pt, inset: 6pt, width: 100%)[${s}]`;
       }
       const out = [[s, plainOf(b)]];
       for (const sh of shapes) { const d = await drawing(sh); if (d) out.push([d, null]); }
@@ -480,7 +505,11 @@
       for (const b of blocks) {
         if (b.kind === "table") parts.push(await table(b));
         else if (b.kind === "textbox") parts.push(await box(b.blocks));
-        else if (b.kind === "p") for (const [s] of await paragraph(b, o)) if (s) parts.push(s);
+        else if (b.kind === "p") {
+          // an empty paragraph in a cell is an empty line: columns of a statement line up through them
+          if (o && o.inCell && !o.plain && zone !== "mcq" && isEmpty(b)) { parts.push(emptyLine(b)); continue; }
+          for (const [s] of await paragraph(b, o)) if (s) parts.push(s);
+        }
       }
       return parts.join(" #parbreak() ");
     }
@@ -622,6 +651,7 @@
       unsplit += H * H;
       const out = [];
       const texts = []; // text boxes (rect shapes with text): placed at the end
+      const single = item.el.localName !== "wgp";
       const place = (x, y, what) => out.push(`#place(top + left, dx: ${pt(x)}, dy: ${pt(y)}, ${what})`);
       const arrow = (x0, y0, x1, y1, p) => {
         const a = Math.atan2(y1 - y0, x1 - x0), L = 5.5, Wd = 2.6;
@@ -643,8 +673,17 @@
         for (const p of kids(tb)) if (p.localName === "p") paras.push(...root.DocxReader.readParagraph(p, item.ctx).filter((x) => x.kind === "p"));
         const parts = [];
         for (const p of paras) {
-          const s = await inline(p.items, p, { keepSize: true });
+          // a numbered or bulleted paragraph keeps its indent and hanging label
+          const L = p.para.list && p.items[0] && p.items[0].label ? p.para.list : null;
+          let s = await inline(L ? p.items.slice(1) : p.items, p, { keepSize: true });
           if (!s) continue;
+          if (L) s = `#num-par(${pt(L.left)}, ${pt(L.hanging)}, ${L.jc === "right" ? "right" : "left"}, [${await inline([Object.assign({}, p.items[0], { text: p.items[0].text.replace(/[\s\u00a0]+$/, "") })], p, { keepSize: true })}], [${s}])`;
+          else {
+            // its own left and hanging indent
+            const ind = p.para.ind || {};
+            const left = (ind.left || 0) - Math.max(0, ind.hanging || 0);
+            if (left > 0.5 || ind.hanging > 0.5) s = `#pad(left: ${pt(Math.max(0, left))})[#par(hanging-indent: ${pt(Math.max(0, ind.hanging || 0))})[${s}]]`;
+          }
           // Word aligns a text-box paragraph left unless it says otherwise
           const jc = p.para.jc;
           parts.push(jc === "right" || jc === "end" ? `#align(right)[${s}]` : jc === "center" ? `#align(center)[${s}]` : `#align(left)[${s}]`);
@@ -686,7 +725,7 @@
         const anchor = bodyPr && bodyPr.getAttribute("anchor");
         const v = anchor === "ctr" ? "horizon" : anchor === "b" ? "bottom" : "top";
         // lines measured down to the descender, so a box sized by its text holds all of it (same line pitch)
-        const content = body ? `[#set par(leading: 0.56em, spacing: 0.56em, justify: false); #set text(bottom-edge: "descender"); #align(${v})[${body}]]` : "[]";
+        const content = body ? `[#set par(leading: 0.56em, spacing: 0.56em, justify: false); #set block(spacing: 0.56em); #set text(bottom-edge: "descender"); #align(${v})[${body}]]` : "[]";
         const W2 = pt(bx.w), H2 = pt(bx.h);
         const poly = polygonFor(prst, bx.w, bx.h);
         if (poly) {
@@ -695,11 +734,14 @@
         } else if (/^(ellipse|flowChartConnector)$/.test(prst)) {
           place(bx.x0, bx.y0, `ellipse(width: ${W2}, height: ${H2}, fill: ${p.fill}, stroke: ${p.stroke}, inset: ${inset})${content}`);
         } else {
-          const radius = /^(roundRect|flowChartAlternateProcess)$/.test(prst) ? pt(Math.min(bx.w, bx.h) * 0.16) : prst === "flowChartTerminator" ? pt(bx.h / 2) : "0pt";
+          // rounded corners: the shape's own setting (Word's default is a sixth of the shorter side)
+          const adjEl = geom && Array.from(geom.getElementsByTagNameNS("*", "gd")).find((g) => g.getAttribute("name") === "adj");
+          const adjV = adjEl ? (parseInt((adjEl.getAttribute("fmla") || "").replace(/^val\s+/, ""), 10) || 0) / 100000 : 0.16667;
+          const radius = /^(roundRect|flowChartAlternateProcess)$/.test(prst) ? pt(Math.min(bx.w, bx.h) * Math.min(0.5, adjV)) : prst === "flowChartTerminator" ? pt(bx.h / 2) : "0pt";
           const r = `rect(width: ${W2}, height: ${H2}, fill: ${p.fill}, stroke: ${p.stroke}, radius: ${radius}, inset: ${inset})${content}`;
           // grown version: at least the Word height (the 0pt-wide box), taller when the text needs it
           const innerH = Math.max(0, bx.h - ins("tIns", 45720) - ins("bIns", 45720));
-          if (body && o && o.raw) texts.push({ bx, r, grow: `rect(width: ${W2}, fill: ${p.fill}, stroke: ${p.stroke}, radius: ${radius}, inset: ${inset}${p.fill !== "none" && p.stroke === "none" ? ", outset: 0.5pt" : ""})[#grid(columns: (0pt, 1fr), box(height: ${pt(innerH)}), ${content})]` });
+          if (body && ((o && o.raw) || single)) texts.push({ bx, r, fill: p.fill, stroke: p.stroke, radius, inset, innerH, content, grow: `rect(width: ${W2}, fill: ${p.fill}, stroke: ${p.stroke}, radius: ${radius}, inset: ${inset}${p.fill !== "none" && p.stroke === "none" ? ", outset: 0.5pt" : ""})[#grid(columns: (0pt, 1fr), box(height: ${pt(innerH)}), ${content})]` });
           else place(bx.x0, bx.y0, r);
         }
       }
@@ -726,6 +768,12 @@
       }
       if (item.el.localName === "wgp") await group(item.el, T0(xfrm(item.el) || { cx: 0, cy: 0, cw: item.cx, ch: item.cy }));
       else await shape(item.el, { x0: 0, y0: 0, w: W, h: H, xf: xfrm(item.el) || {} });
+      // a text box on its own in the text: as wide as in Word (never wider than the column), at least as tall,
+      // growing with its text and breaking over pages, so its text can never spill out of it
+      if (single && !(o && o.raw) && texts.length === 1 && !out.length && !item.floating) {
+        const t = texts[0];
+        return `#grow-box(${pt(W)}, ${(o && o.al) || "left"}, block(width: 100%, fill: ${t.fill}, stroke: ${t.stroke}, radius: ${t.radius}, inset: ${t.inset}, breakable: true)[#grid(columns: (0pt, 1fr), box(height: ${pt(Math.min(t.innerH, 500))}), ${t.content})])`;
+      }
       // beside text (wrap-pic) a single text box may grow when its text is taller in Typst than in Word, so the
       // text flowing underneath never runs into it; it stays in the flow, at least as tall as the drawing
       if (o && o.raw && texts.length === 1) {
@@ -824,7 +872,7 @@
     function closeCols() {
       if (colKey !== null) {
         // what pictures that cannot split may leave empty at column ends (about h^2 / column height for each one)
-        lines[colLine] = `#bal-cols(${curN}, ${pt(curGap)}, ${pt(unsplit / 620 / curN)})[`;
+        lines[colLine] = `#bal-cols(${curN}, ${pt(curGap)}, ${pt(unsplit / (pg.h - pg.top - pg.bottom - 20) / curN)})[`;
         push("]", null); blank(); colKey = null;
       }
       curN = 1;
@@ -842,6 +890,7 @@
       for (let k = 0; k < blocks.length; k++) {
         const b = blocks[k];
         enter(b);
+        if (isEmpty(b) && b.para.borders && Object.values(b.para.borders).some(Boolean)) { push(emptyLine(b), null); blank(); continue; }
         if (isEmpty(b)) {
           if (!afterFloat) {
             const pa = b.para || {};
@@ -956,7 +1005,9 @@
 
     const files = {
       "main.typ": main.join("\n") + "\n",
-      "page_setup_template.typ": opts.greyscale === false ? PAGE_SETUP.replace('media-folder  = "media" ', 'media-folder  = "media_color"') : PAGE_SETUP,
+      "page_setup_template.typ": (opts.greyscale === false ? PAGE_SETUP.replace('media-folder  = "media" ', 'media-folder  = "media_color"') : PAGE_SETUP)
+        .replace("__PAGE_W__", pt(pg.w)).replace("__PAGE_H__", pt(pg.h)).replace("__MAR_T__", pt(pg.top)).replace("__MAR_B__", pt(pg.bottom))
+        .replace("__MAR_L__", pt(pg.left)).replace("__MAR_R__", pt(pg.right)),
       "tags/mcq.typ": MCQ_TAG,
       "tags/cq.typ": CQ_TAG,
     };
@@ -989,6 +1040,9 @@
 #let base-leading  = 0.60em       // line spacing
 #let base-indent   = 0pt          // first-line indent
 #let eq-indent     = 0pt          // indent for display (block) math equations
+#let page-width    = __PAGE_W__   // page size and margins: the Word file's own
+#let page-height   = __PAGE_H__
+#let page-margin   = (top: __MAR_T__, bottom: __MAR_B__, left: __MAR_L__, right: __MAR_R__)
 #let word-leading  = ${WORD_LEADING.toFixed(3)}em     // line spacing of everything outside MCQ: a Word single line of this font
 #let media-folder  = "media"      // "media" for greyscale, "media_color" for colour
 #let header-image        = "templates/header_logo.png"  // header logo
@@ -1137,6 +1191,9 @@
   }
 }
 
+// a text box standing in the text: w wide, or the column when that is narrower
+#let grow-box(w, al, body) = layout(size => align(al, block(width: calc.min(w, size.width), body)))
+
 // a floating figure that lies over the text at its Word position, taking no room of its own
 #let overlay(x, y, fig) = block(width: 100%, height: 0pt, above: 0pt, below: 0pt, sticky: true, place(top + left, dx: x, dy: y, fig))
 
@@ -1206,13 +1263,11 @@
     #it.body
   ]
 
-  // ── Page geometry ──────────────────────────────────────────────────────────
-  // Page size  : 8.5" × 10.6"
-  // Margins    : Top 0.68" | Bottom 0.68" | Left 0.58" | Right 0.58"
+  // ── Page geometry: the tokens at the top of this file (taken from the Word file) ──
   set page(
-    width: 8.5in,
-    height: 10.6in,
-    margin: (top: 0.68in, bottom: 0.68in, left: 0.58in, right: 0.58in),
+    width: page-width,
+    height: page-height,
+    margin: page-margin,
     header-ascent: 0.06in,
     footer-descent: 0.03in,
     header: chapter-header(label),

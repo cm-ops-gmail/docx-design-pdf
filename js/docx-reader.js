@@ -143,7 +143,7 @@
       const side = { start: "left", end: "right" }[b.localName] || b.localName;
       if (!v || v === "none" || v === "nil") { o[side] = null; continue; }
       const c = wval(b, "color");
-      o[side] = { w: Math.max(0.25, (parseInt(wval(b, "sz"), 10) || 4) / 8), color: c && c !== "auto" ? c : "000000" };
+      o[side] = { w: Math.max(0.25, (parseInt(wval(b, "sz"), 10) || 4) / 8), color: c && c !== "auto" ? c : "000000", space: parseInt(wval(b, "space"), 10) || 0 };
     }
     return o;
   }
@@ -178,7 +178,10 @@
         if (tw("line") != null) { o.line = tw("line"); o.lineRule = wval(c, "lineRule") || "auto"; }
       } else if (n === "tabs") {
         o.tabs = kids(c).filter((t) => t.localName === "tab" && wval(t) !== "clear").map((t) => ({ pos: (parseInt(wval(t, "pos"), 10) || 0) / 20, val: wval(t) || "left" }));
-      } else if (n === "pBdr") o.border = kids(c).some((b) => wval(b) && wval(b) !== "none" && wval(b) !== "nil");
+      } else if (n === "pBdr") {
+        o.border = kids(c).some((b) => wval(b) && wval(b) !== "none" && wval(b) !== "nil");
+        o.borders = bordersOf(c); // per side: { w, color, space } or null
+      }
       else if (n === "rPr") o.markRun = runProps(c);
     }
     return o;
@@ -380,7 +383,12 @@
     const settings = await readXml(zip, `${mainDir}settings.xml`);
     const dts = settings && settings.getElementsByTagNameNS(W, "defaultTabStop")[0];
     const defaultTab = dts ? (parseInt(wval(dts), 10) || 720) / 20 : 36;
-    return { blocks: out, getMedia, zip, doc, mainPath, sectionLabels, defaultTab };
+    // the page of the document (its first section): size, margins, header and footer distance, in points
+    const sp0 = sectPrs[0], twp = (el, a, d) => (el && wval(el, a) != null ? (parseInt(wval(el, a), 10) || 0) / 20 : d);
+    const pg0 = sp0 && wkid(sp0, "pgSz"), mar0 = sp0 && wkid(sp0, "pgMar");
+    const page = pg0 ? { w: twp(pg0, "w", 612), h: twp(pg0, "h", 792), top: twp(mar0, "top", 72), bottom: twp(mar0, "bottom", 72),
+      left: twp(mar0, "left", 72), right: twp(mar0, "right", 72), header: twp(mar0, "header", 36), footer: twp(mar0, "footer", 36) } : null;
+    return { blocks: out, getMedia, zip, doc, mainPath, sectionLabels, defaultTab, page, ctx };
   }
 
   // ---------- paragraphs ----------
@@ -418,7 +426,7 @@
     const text = merged.map((it) => (it.t === "text" ? it.text : it.t === "br" ? "\n" : OBJ)).join("");
     const textRuns = merged.filter((it) => it.t === "text" && it.text.trim());
     const para = {
-      jc: sp.jc || "", shd: sp.shd || "", border: !!sp.border, keepNext: !!sp.keepNext,
+      jc: sp.jc || "", shd: sp.shd || "", border: !!sp.border, borders: sp.border ? sp.borders : null, keepNext: !!sp.keepNext,
       pageBreakBefore: !!sp.pageBreakBefore, styleName, list,
       before: sp.before || 0, after: sp.after || 0, line: sp.line || 240, lineRule: sp.lineRule || "auto",
       ind: paraInd(st, styleId, numInd, direct), tabs: sp.tabs || [], markSize: (sp.markRun && sp.markRun.sz) || baseRun.sz || 0,

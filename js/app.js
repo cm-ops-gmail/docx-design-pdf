@@ -25,12 +25,12 @@
   })();
 
   function unitsFor(seg) {
-    if (seg.type === "mcq") return Classify.mcqUnits(seg.blocks).map((u) => Render.mcqUnit(u));
+    if (seg.type === "mcq") return Classify.mcqUnits(Classify.splitMcqLines(seg.blocks)).map((u) => Render.mcqUnit(u));
     if (seg.type === "cq") {
       const roles = Classify.cqRoles(seg.blocks);
-      return seg.blocks.map((b, i) => Render.cqBlock(b, roles[i]));
+      return Render.wordBlocks(seg.blocks, { word: true, twoCol: true }, (b, i, o) => Render.cqBlock(b, roles[i], o));
     }
-    return seg.blocks.map((b) => Render.block(b));
+    return Render.wordBlocks(seg.blocks, { word: true });
   }
 
   async function convert(file) {
@@ -55,6 +55,7 @@
 
       const override = $("label").value.trim();
       const firstLabel = (segs.find((s) => s.type === "section" && s.label) || {}).label;
+      PageSetup.setPage(model.page); // the Word file's own page size
       const pager = new Paginator(pagesEl, $("measure"), { label: override || firstLabel || stem });
       let done = 0;
       for (const seg of segs) {

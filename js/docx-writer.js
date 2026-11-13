@@ -490,7 +490,54 @@
     setChild(pPr, wel("ind", { left: HANG, hanging: HANG }), PPR);
   }
 
-  function styleMcq(seg, colTw) {
+  // One Word paragraph can hold a question, its options and its answer on lines of their own. It is cut into
+  // paragraphs at those lines (same formatting; the answer line keeps what follows it), so the options can be
+  // laid out like any others. Returns the part's blocks with the new paragraphs in place of the old one.
+  function splitCombined(blocks, ctx) {
+    const out = [];
+    for (const b of blocks) {
+      const p = b.node;
+      const g = p && p.parentNode && ctx && !wkid(wkid(p, "pPr"), "numPr") ? root.Classify.mcqLineGroups(b) : null;
+      if (!g) { out.push(b); continue; }
+      // the paragraph's content line by line; a run holding a line break is cut in two
+      const lines = [[]];
+      for (const n of Array.from(p.childNodes)) {
+        if (n.nodeType !== 1 || isW(n, "pPr")) continue;
+        if (!isW(n, "r")) { lines[lines.length - 1].push(n); continue; }
+        const rPr = wkid(n, "rPr");
+        let cur = null;
+        for (const k of Array.from(n.childNodes)) {
+          if (k.nodeType !== 1 || k === rPr) continue;
+          if ((isW(k, "br") && !/^(page|column)$/.test(k.getAttributeNS(W, "type") || "")) || isW(k, "cr")) { cur = null; lines.push([]); continue; }
+          if (!cur) { cur = n.cloneNode(false); if (rPr) cur.appendChild(rPr.cloneNode(true)); lines[lines.length - 1].push(cur); }
+          cur.appendChild(k);
+        }
+      }
+      if (lines.length !== g.lines.length) { out.push(b); continue; } // a break somewhere unusual: left as it is
+      const pPr = wkid(p, "pPr");
+      const made = [];
+      g.groups.forEach((grp, gi) => {
+        const np = wel("p");
+        if (pPr) {
+          const c = pPr.cloneNode(true);
+          if (gi < g.groups.length - 1) { const sp = wkid(c, "sectPr"); if (sp) sp.remove(); } // a section ends once
+          np.appendChild(c);
+        }
+        grp.forEach((n, k) => {
+          if (k) np.appendChild(wel("r")).appendChild(wel("br"));
+          for (const node of lines[n]) np.appendChild(node);
+        });
+        p.parentNode.insertBefore(np, p);
+        made.push(np);
+      });
+      p.remove();
+      for (const np of made) out.push(...root.DocxReader.readParagraph(np, ctx));
+    }
+    return out;
+  }
+
+  function styleMcq(seg, colTw, ctx) {
+    seg.blocks = splitCombined(seg.blocks, ctx);
     const units = root.Classify.mcqUnits(seg.blocks);
     let done = 0;
     for (const u of units) {
@@ -587,7 +634,7 @@
       body.insertBefore(startMark, first);
       body.insertBefore(endMark, last.nextSibling);
 
-      if (seg.type === "mcq") stats.questions += styleMcq(seg, colTw); else styleCq(seg);
+      if (seg.type === "mcq") stats.questions += styleMcq(seg, colTw, model.ctx); else styleCq(seg);
 
       // the part's paragraphs: size, MCQ hanging indent, fitting wide pictures and tables
       const inPart = [];

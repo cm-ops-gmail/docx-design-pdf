@@ -12,12 +12,12 @@
   const escAttr = (s) => String(s || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 
   function unitsFor(seg) {
-    if (seg.type === "mcq") return C().mcqUnits(seg.blocks).map((u) => R().mcqUnit(u));
+    if (seg.type === "mcq") return C().mcqUnits(C().splitMcqLines(seg.blocks)).map((u) => R().mcqUnit(u));
     if (seg.type === "cq") {
       const roles = C().cqRoles(seg.blocks);
-      return seg.blocks.map((b, i) => R().cqBlock(b, roles[i]));
+      return R().wordBlocks(seg.blocks, { word: true, twoCol: true }, (b, i, o) => R().cqBlock(b, roles[i], o));
     }
-    return seg.blocks.map((b) => R().block(b));
+    return R().wordBlocks(seg.blocks, { word: true });
   }
 
   async function generate(model, segs, opts) {
@@ -70,6 +70,7 @@
     }
 
     const title = escAttr(opts.name || "Document");
+    const pw = (model.page && model.page.w) || 612, ph = (model.page && model.page.h) || 763.2;
     const index = `<!doctype html>
 <html lang="bn">
 <head>
@@ -80,6 +81,11 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
 <link rel="stylesheet" href="fonts.css">
 <link rel="stylesheet" href="style.css">
+<!-- The page size of the Word file. Change both lines together. -->
+<style>
+:root { --pw: ${pw}pt; --ph: ${ph}pt; }
+@page { size: ${pw}pt ${ph}pt; margin: 0; }
+</style>
 </head>
 <body>
 <div class="toolbar"><button onclick="print()">Print / Save as PDF</button></div>

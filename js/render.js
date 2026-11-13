@@ -178,6 +178,41 @@
   const visible = (b) => C().clean(b);
   const onlyObjects = (b) => !visible(b) && b.items.some((i) => i.t === "img" || i.t === "shape" || i.t === "missing");
 
+  // ---------- Word's own paragraph and table settings (outside MCQ parts) ----------
+  const PG = () => root.PageGeom || { CW: 7.34 * 96, COLW: 3.5 * 96 };
+  const borderCss = (e) => (e ? `${Math.max(0.5, e.w)}pt solid ${/^0{6}$/.test(e.color) ? "#000" : "#" + e.color}` : "none");
+
+  // line height, space before / after, alignment, indents and borders of a paragraph as the Word file sets them
+  function wordPara(p, b, opts) {
+    const pa = b.para || {};
+    p.classList.add("w");
+    const st = p.style;
+    st.lineHeight = pa.lineRule === "exact" ? pa.line / 20 + "pt" : (1.575 * (pa.lineRule === "auto" ? pa.line / 240 : 1)).toFixed(3);
+    if (pa.before) st.paddingTop = pa.before + "pt";
+    p.style.setProperty("--after", (pa.after || 0) + "pt");
+    st.textAlign = pa.jc === "center" ? "center" : pa.jc === "right" || pa.jc === "end" ? "right" : pa.jc === "both" || pa.jc === "distribute" ? "justify" : "left";
+    if (!opts.noIndent) {
+      const ind = pa.ind || {}, hang = ind.hanging || 0;
+      const pad = (pa.shd ? 3 : 0);
+      st.paddingLeft = (ind.left || 0) + pad + "pt";
+      if (hang !== 0) st.textIndent = -hang + "pt";
+      if (ind.right || pad) st.paddingRight = (ind.right || 0) + pad + "pt";
+    }
+    const B = pa.borders;
+    if (B) for (const [k, css] of [["top", "borderTop"], ["bottom", "borderBottom"], ["left", "borderLeft"], ["right", "borderRight"]]) if (B[k]) st[css] = borderCss(B[k]);
+    // a list label sits in the hanging space
+    const hang = pa.list && pa.list.hanging;
+    if (hang && !opts.noIndent && p.firstChild && b.items[0] && b.items[0].label) {
+      const lab = el("span", "lab");
+      lab.style.minWidth = hang + "pt";
+      if (pa.list.jc === "right") lab.style.textAlign = "right";
+      lab.appendChild(p.firstChild);
+      p.insertBefore(lab, p.firstChild);
+    }
+    if (!p.textContent && !p.querySelector("img,.drawing-holder,.katex,br")) p.appendChild(document.createTextNode("\u200b")); // an empty line keeps its height
+    return p;
+  }
+
   function paraEl(b, opts) {
     opts = opts || {};
     const items = b.items;
@@ -202,6 +237,7 @@
       else if (pa.jc === "right" || pa.jc === "end") p.style.textAlign = "right";
       else p.style.textAlign = opts.inShape ? "left" : "left";
       p.appendChild(inline(items, opts.inShape ? { keepSize: true } : opts));
+      if (opts.word && !opts.inShape) wordPara(p, b, opts);
       return p;
     }
     if (pa.heading === 1) p.classList.add("h1");
@@ -211,19 +247,28 @@
     if (pa.shd) { p.classList.add("shd"); p.style.backgroundColor = "#" + pa.shd; }
     if (pa.border) p.classList.add("boxed");
     p.appendChild(inline(items, Object.assign({ withText: visible(b).length >= 150 ? "long" : "short" }, opts)));
+    if (opts.word && !pa.heading) wordPara(p, b, opts);
     p.dataset.split = pa.heading || pa.shd ? "none" : "text";
     if (pa.heading || pa.keepNext || (pa.allBold && visible(b).length < 70)) p.dataset.keepnext = "1";
     return p;
   }
 
   // a one-cell table is a box around ordinary content; it may break between its paragraphs
-  function cellBox(t) {
+  function cellBox(t, opts) {
     const c = t.rows[0].cells[0];
-    const box = el("div", "cellbox" + (t.bordered ? " bordered" : ""));
+    const word = !!(opts && opts.word);
+    const box = el("div", "cellbox" + (t.bordered && !word ? " bordered" : ""));
     if (c.fill) box.style.backgroundColor = "#" + c.fill;
+    if (word) {
+      // borders and margins as Word sets them (table, then cell)
+      const B = t.tblBorders || {}, own = c.borders || {};
+      for (const [k, css] of [["top", "borderTop"], ["bottom", "borderBottom"], ["left", "borderLeft"], ["right", "borderRight"]]) box.style[css] = borderCss(own[k] !== undefined ? own[k] : B[k]);
+      const m = Object.assign({}, t.cellMar || {}, c.mar || {});
+      box.style.padding = `${m.top || 0}pt ${m.right != null ? m.right : 5.4}pt 0 ${m.left != null ? m.left : 5.4}pt`;
+    }
     for (const b of c.blocks) {
-      if (b.kind === "p" && !b.text.trim() && !b.items.length) continue;
-      box.appendChild(block(b));
+      if (!word && b.kind === "p" && !b.text.trim() && !b.items.length) continue;
+      box.appendChild(block(b, opts));
     }
     box.dataset.split = "kids";
     return box;
@@ -231,14 +276,30 @@
 
   function tableEl(t, opts) {
     opts = opts || {};
-    if (!opts.inShape && !opts.inCell && t.rows.length === 1 && t.rows[0].cells.length === 1 && t.rows[0].cells[0].span === 1) return cellBox(t);
-    const table = el("table", "tbl" + (t.bordered ? "" : " plain") + (opts.inShape ? " in-shape" : ""));
+    if (!opts.inShape && !opts.inCell && t.rows.length === 1 && t.rows[0].cells.length === 1 && t.rows[0].cells[0].span === 1) return cellBox(t, opts);
+    const word = !!opts.word && !opts.inShape;
+    const table = el("table", word ? "tbl w" : "tbl" + (t.bordered ? "" : " plain") + (opts.inShape ? " in-shape" : ""));
     const ncols = Math.max(t.cols.length, ...t.rows.map((r) => r.cells.reduce((s, c) => s + c.span, 0)));
     const total = t.cols.reduce((a, b) => a + b, 0);
     if (t.cols.length === ncols && total > 0) {
       const cg = el("colgroup");
       for (const w of t.cols) { const c = el("col"); c.style.width = (100 * w / total).toFixed(2) + "%"; cg.appendChild(c); }
       table.appendChild(cg);
+    }
+    if (word) {
+      // width and position as in Word: its own width when narrower than the column, else the column
+      const room = opts.twoCol ? PG().COLW : PG().CW; // px
+      let wantedPt = total / 20;
+      if (t.width && t.width.type === "pct") wantedPt = (t.width.w / 5000) * (room * 0.75);
+      else if (t.width && t.width.type === "dxa" && t.width.w) wantedPt = t.width.w / 20;
+      const wantedPx = (wantedPt * 96) / 72;
+      if (!t.nested && wantedPx > 0 && wantedPx < room * 0.97) {
+        table.style.width = wantedPx + "px";
+        if (t.jc === "center") table.style.margin = "0 auto";
+        else if (t.jc === "right" || t.jc === "end") table.style.marginLeft = "auto";
+        else if (t.ind) table.style.marginLeft = t.ind + "pt";
+      }
+      if (ncols >= 6 && room / ncols < 42) table.classList.add("dense");
     }
     const tbody = el("tbody");
     // vertical merges: count how many rows each "restart" cell spans
@@ -258,13 +319,27 @@
           if (rs > 1) td.rowSpan = rs;
         }
         if (c.fill) td.style.backgroundColor = "#" + c.fill;
-        else if (ri === 0 && t.bordered && t.rows.length > 1) td.classList.add("head");
-        if (ri === 0 && t.bordered && t.rows.length > 1) td.classList.add("row0");
+        else if (!word && ri === 0 && t.bordered && t.rows.length > 1) td.classList.add("head");
+        if (!word && ri === 0 && t.bordered && t.rows.length > 1) td.classList.add("row0");
         if (c.valign === "top") td.style.verticalAlign = "top";
         else if (c.valign === "bottom") td.style.verticalAlign = "bottom";
+        else if (word && c.valign === "center") td.style.verticalAlign = "middle";
+        if (word) {
+          // borders: the table's, then the cell's own; margins likewise
+          const B = t.tblBorders || {}, own = c.borders || {};
+          let rs = 1;
+          if (c.vmerge === "restart") for (let k = ri + 1; k < grid.length; k++) { const below = grid[k].find((x) => x.col === col); if (below && below.c.vmerge === "continue") rs++; else break; }
+          const side = (name, outer, inner, edge) => (own[name] !== undefined ? own[name] : edge ? B[outer] : B[inner]);
+          td.style.borderTop = borderCss(side("top", "top", "insideH", ri === 0));
+          td.style.borderBottom = borderCss(side("bottom", "bottom", "insideH", ri + rs >= t.rows.length));
+          td.style.borderLeft = borderCss(side("left", "left", "insideV", col === 0));
+          td.style.borderRight = borderCss(side("right", "right", "insideV", col + c.span >= ncols));
+          const m = Object.assign({}, t.cellMar || {}, c.mar || {});
+          if (m.left != null || m.right != null || m.top != null || m.bottom != null) td.style.padding = `${m.top || 0}pt ${m.right != null ? m.right : 5.4}pt ${m.bottom || 0}pt ${m.left != null ? m.left : 5.4}pt`;
+        }
         for (const b of c.blocks) {
           if (b.kind === "table") td.appendChild(tableEl(b, opts));
-          else if (b.kind === "p" && (b.text.trim() || b.items.length)) td.appendChild(onlyObjects(b) ? figInCell(b) : paraEl(b, { inCell: true, inShape: opts.inShape }));
+          else if (b.kind === "p" && (word || b.text.trim() || b.items.length)) td.appendChild(onlyObjects(b) ? figInCell(b) : paraEl(b, { inCell: true, inShape: opts.inShape, word: opts.word }));
         }
         tr.appendChild(td);
       });
@@ -403,8 +478,8 @@
   }
 
   // ---------- CQ ----------
-  function cqBlock(b, role) {
-    const e = block(b);
+  function cqBlock(b, role, opts) {
+    const e = block(b, role === "cq-subq" && opts ? Object.assign({}, opts, { noIndent: true }) : opts);
     if (b.kind !== "p" || !role) return e;
     e.classList.add(role);
     if (role === "cq-section" || role === "cq-anshdr" || role === "cq-stem-label") e.dataset.keepnext = "1";
@@ -413,5 +488,19 @@
     return e;
   }
 
-  root.Render = { prepareImages, block, mcqUnit, cqBlock, layoutOptions, inline };
+  // the blocks of a normal or CQ part in Word's settings. An empty paragraph is an empty line, except right after a
+  // floating figure, where it only made room for the figure in Word. wrap(b, i, opts) builds a block (CQ roles).
+  function wordBlocks(blocks, opts, wrap) {
+    const out = [];
+    let afterFloat = false;
+    blocks.forEach((b, i) => {
+      const empty = b.kind === "p" && !visible(b) && !b.items.some((it) => it.t !== "text" && it.t !== "br" && it.t !== "tab");
+      if (empty && afterFloat) return;
+      out.push(wrap ? wrap(b, i, opts) : block(b, opts));
+      afterFloat = b.kind === "p" && b.items.some((it) => (it.t === "img" || it.t === "shape") && it.floating);
+    });
+    return out;
+  }
+
+  root.Render = { prepareImages, block, mcqUnit, cqBlock, wordBlocks, layoutOptions, inline };
 })(typeof globalThis !== "undefined" ? globalThis : this);
